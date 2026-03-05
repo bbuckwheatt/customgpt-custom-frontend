@@ -18,7 +18,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  initialArtifactData,
+  ArtifactChatContext,
   useArtifact,
   useArtifactSelector,
 } from "@/hooks/use-artifact";
@@ -103,14 +103,6 @@ export function Chat({
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, [router]);
-  const { setArtifact } = useArtifact();
-
-  // Reset artifact state when switching conversations so the reopener chip
-  // from a previous chat doesn't bleed into the new chat.
-  useEffect(() => {
-    setArtifact(initialArtifactData);
-  }, [id, setArtifact]);
-
   const { setDataStream } = useDataStream();
 
   const [input, setInput] = useState<string>("");
@@ -240,7 +232,7 @@ export function Chat({
   });
 
   return (
-    <>
+    <ArtifactChatContext.Provider value={id}>
       <div className="overscroll-behavior-contain flex h-dvh min-w-0 touch-pan-y flex-col bg-background">
         <ChatHeader
           chatId={id}
@@ -332,6 +324,6 @@ export function Chat({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </>
+    </ArtifactChatContext.Provider>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { createContext, useCallback, useContext, useMemo } from "react";
 import useSWR from "swr";
 import type { UIArtifact } from "@/components/artifact";
 
@@ -19,10 +19,21 @@ export const initialArtifactData: UIArtifact = {
   },
 };
 
+// Scopes artifact SWR keys per conversation.
+// Wrap a chat subtree with <ArtifactChatContext.Provider value={chatId}>
+// so that all useArtifact calls inside use an isolated key.
+export const ArtifactChatContext = createContext<string>("");
+
+function useArtifactKey() {
+  const chatId = useContext(ArtifactChatContext);
+  return chatId ? `artifact-${chatId}` : "artifact";
+}
+
 type Selector<T> = (state: UIArtifact) => T;
 
 export function useArtifactSelector<Selected>(selector: Selector<Selected>) {
-  const { data: localArtifact } = useSWR<UIArtifact>("artifact", null, {
+  const key = useArtifactKey();
+  const { data: localArtifact } = useSWR<UIArtifact>(key, null, {
     fallbackData: initialArtifactData,
   });
 
@@ -37,8 +48,9 @@ export function useArtifactSelector<Selected>(selector: Selector<Selected>) {
 }
 
 export function useArtifact() {
+  const key = useArtifactKey();
   const { data: localArtifact, mutate: setLocalArtifact } = useSWR<UIArtifact>(
-    "artifact",
+    key,
     null,
     {
       fallbackData: initialArtifactData,
