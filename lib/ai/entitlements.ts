@@ -9,7 +9,7 @@ export const entitlementsByUserType: Record<UserType, Entitlements> = {
    * For users without an account
    */
   guest: {
-    maxMessagesPerHour: 10,
+    maxMessagesPerHour: 5,
   },
 
   /*
@@ -20,6 +20,9 @@ export const entitlementsByUserType: Record<UserType, Entitlements> = {
   },
 
   /*
-   * TODO: For users with an account and a paid membership
+   * For admin users — no rate limiting
    */
+  admin: {
+    maxMessagesPerHour: Number.POSITIVE_INFINITY,
+  },
 };

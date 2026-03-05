@@ -6,7 +6,9 @@ import { DUMMY_PASSWORD } from "@/lib/constants";
 import { createGuestUser, getUser } from "@/lib/db/queries";
 import { authConfig } from "./auth.config";
 
-export type UserType = "guest" | "regular";
+export type UserType = "guest" | "regular" | "admin";
+
+const ADMIN_EMAILS = ["cameron@customgpt.ai"];
 
 declare module "next-auth" {
   interface Session extends DefaultSession {
@@ -61,7 +63,10 @@ export const {
           return null;
         }
 
-        return { ...user, type: "regular" };
+        const type: UserType = ADMIN_EMAILS.includes(user.email ?? "")
+          ? "admin"
+          : "regular";
+        return { ...user, type };
       },
     }),
     Credentials({
