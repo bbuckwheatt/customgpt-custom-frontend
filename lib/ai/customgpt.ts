@@ -44,8 +44,188 @@ Rules:
 `;
 
 /**
- * Streams from CustomGPT's OpenAI-compatible endpoint and collects the full response.
- * Real-time streaming is preserved on the path from our server to the browser.
+ * Streams text from CustomGPT to the UI in real-time while detecting and
+ * buffering <artifact> blocks (which are processed after the stream closes).
+ *
+ * - Text before any <artifact> tag → text-start / text-delta events in real-time
+ * - <artifact>...</artifact>       → buffered, then emitted as data-* artifact events
+ * - Text after </artifact>         → emitted as text-delta events after artifact
+ *
+ * Returns the full accumulated response text.
+ */
+export async function streamCustomGPTToDataStream({
+  messages,
+  projectId = CUSTOMGPT_PROJECT_ID,
+  apiKey = CUSTOMGPT_API_KEY,
+  signal,
+  dataStream,
+  session,
+}: {
+  messages: Array<{ role: string; content: string }>;
+  projectId?: string;
+  apiKey?: string;
+  signal?: AbortSignal;
+  dataStream: UIMessageStreamWriter<ChatMessage>;
+  session: Session;
+}): Promise<string> {
+  const response = await fetch(
+    `${CUSTOMGPT_API_BASE}/projects/${projectId}/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      },
+      body: JSON.stringify({ messages, stream: true }),
+      signal,
+    }
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`CustomGPT API error ${response.status}: ${text}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("No response body from CustomGPT");
+
+  const ARTIFACT_OPEN = "<artifact";
+  const decoder = new TextDecoder();
+  let sseBuf = "";
+  let accumulated = "";
+
+  // Text streaming state
+  const textId = generateUUID();
+  let textStarted = false;
+  // Text held back to check whether it's the beginning of an <artifact tag
+  let held = "";
+  // Once we see <artifact, stop flushing text immediately
+  let artifactMode = false;
+
+  const emitText = (text: string) => {
+    if (!text) return;
+    if (!textStarted) {
+      dataStream.write({ type: "text-start", id: textId });
+      textStarted = true;
+    }
+    dataStream.write({ type: "text-delta", delta: text, id: textId });
+  };
+
+  /**
+   * Tries to flush as much of `held` as possible as text-delta events,
+   * while keeping back any suffix that could be the start of "<artifact".
+   */
+  const tryFlush = (incoming: string) => {
+    if (artifactMode) return;
+    held += incoming;
+
+    // Check for a complete <artifact opening in what we've buffered
+    const idx = held.indexOf(ARTIFACT_OPEN);
+    if (idx !== -1) {
+      const before = held.slice(0, idx);
+      if (before) emitText(before);
+      held = "";
+      artifactMode = true;
+      return;
+    }
+
+    // Check if the tail of `held` is a partial prefix of ARTIFACT_OPEN.
+    // If so, keep that suffix buffered; flush everything before it.
+    let safeTo = held.length;
+    for (
+      let i = Math.min(held.length, ARTIFACT_OPEN.length - 1);
+      i >= 1;
+      i--
+    ) {
+      if (ARTIFACT_OPEN.startsWith(held.slice(-i))) {
+        safeTo = held.length - i;
+        break;
+      }
+    }
+
+    if (safeTo > 0) {
+      emitText(held.slice(0, safeTo));
+      held = held.slice(safeTo);
+    }
+  };
+
+  outer: while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    sseBuf += decoder.decode(value, { stream: true });
+    const lines = sseBuf.split("\n");
+    sseBuf = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data: ")) continue;
+      const payload = trimmed.slice(6);
+      if (payload === "[DONE]") break outer;
+
+      try {
+        const chunk = JSON.parse(payload);
+        const delta = chunk.choices?.[0]?.delta?.content;
+        if (typeof delta === "string") {
+          accumulated += delta;
+          tryFlush(delta);
+        }
+      } catch {
+        // skip malformed chunks
+      }
+    }
+  }
+
+  // Flush any remaining held text (only possible when no artifact was found)
+  if (!artifactMode && held) {
+    emitText(held);
+  }
+
+  if (textStarted) {
+    dataStream.write({ type: "text-end", id: textId });
+  }
+
+  // --- Post-stream artifact processing ---
+  const artifactRe =
+    /<artifact\s+type="(text|code|sheet)"(?:\s+language="([^"]*)")?(?:\s+title="([^"]*)")?[^>]*>([\s\S]*?)<\/artifact>/i;
+  const match = artifactRe.exec(accumulated);
+
+  if (match) {
+    const [fullMatch, rawType, , rawTitle, rawContent] = match;
+    const afterArtifact = accumulated.slice(match.index + fullMatch.length).trim();
+
+    const kind = rawType as ArtifactKind;
+    const content = rawContent.trim();
+    const title = rawTitle?.trim() || deriveTitle(content, kind);
+    const docId = generateUUID();
+
+    dataStream.write({ type: "data-kind", data: kind, transient: true });
+    dataStream.write({ type: "data-id", data: docId, transient: true });
+    dataStream.write({ type: "data-title", data: title, transient: true });
+    dataStream.write({ type: "data-clear", data: null, transient: true });
+
+    for (const word of content.split(/(?<=\s)/)) {
+      dataStream.write({ type: "data-textDelta", data: word, transient: true });
+    }
+
+    if (session?.user?.id) {
+      await saveDocument({ id: docId, title, content, kind, userId: session.user.id });
+    }
+
+    dataStream.write({ type: "data-finish", data: null, transient: true });
+
+    if (afterArtifact) {
+      writeTextChunk(dataStream, afterArtifact);
+    }
+  }
+
+  return accumulated;
+}
+
+/**
+ * Streams from CustomGPT's OpenAI-compatible endpoint and collects the full
+ * response as a string. Used for non-streaming calls (e.g. title generation).
  */
 export async function fetchCustomGPTResponse({
   messages,
@@ -117,79 +297,6 @@ async function readSSEStream(response: Response): Promise<string> {
   return fullText;
 }
 
-/**
- * Parses the CustomGPT response for <artifact> tags and writes the
- * appropriate events to the UI message stream.
- *
- * Text outside artifact tags → text-start / text-delta / text-end
- * Artifact content          → data-kind / data-id / data-title / data-clear /
- *                              data-textDelta / data-finish  +  saveDocument
- */
-export async function emitParsedResponse({
-  fullText,
-  messageId,
-  dataStream,
-  session,
-}: {
-  fullText: string;
-  messageId: string;
-  dataStream: UIMessageStreamWriter<ChatMessage>;
-  session: Session;
-}) {
-  const artifactRe =
-    /<artifact\s+type="(text|code|sheet)"(?:\s+language="([^"]*)")?(?:\s+title="([^"]*)")?[^>]*>([\s\S]*?)<\/artifact>/i;
-
-  const match = artifactRe.exec(fullText);
-
-  if (!match) {
-    writeTextChunk(dataStream, fullText.trim());
-    return;
-  }
-
-  const [fullMatch, rawType, language, rawTitle, rawContent] = match;
-  const beforeArtifact = fullText.slice(0, match.index).trim();
-  const afterArtifact = fullText.slice(match.index + fullMatch.length).trim();
-
-  if (beforeArtifact) {
-    writeTextChunk(dataStream, beforeArtifact);
-  }
-
-  // --- Artifact emission ---
-  const kind = rawType as ArtifactKind;
-  const content = rawContent.trim();
-  const title =
-    rawTitle?.trim() ||
-    deriveTitle(content, kind);
-  const docId = generateUUID();
-
-  dataStream.write({ type: "data-kind", data: kind, transient: true });
-  dataStream.write({ type: "data-id", data: docId, transient: true });
-  dataStream.write({ type: "data-title", data: title, transient: true });
-  dataStream.write({ type: "data-clear", data: null, transient: true });
-
-  // Stream the artifact content word-by-word for a smooth typing effect
-  const words = content.split(/(?<=\s)/);
-  for (const word of words) {
-    dataStream.write({ type: "data-textDelta", data: word, transient: true });
-  }
-
-  if (session?.user?.id) {
-    await saveDocument({
-      id: docId,
-      title,
-      content,
-      kind,
-      userId: session.user.id,
-    });
-  }
-
-  dataStream.write({ type: "data-finish", data: null, transient: true });
-
-  if (afterArtifact) {
-    writeTextChunk(dataStream, afterArtifact);
-  }
-}
-
 /** Writes a text string as text-start → text-delta(s) → text-end events. */
 function writeTextChunk(
   dataStream: UIMessageStreamWriter<ChatMessage>,
@@ -198,7 +305,6 @@ function writeTextChunk(
   const textId = generateUUID();
   dataStream.write({ type: "text-start", id: textId });
 
-  // Split on whitespace boundaries so we get natural word-by-word streaming
   const tokens = text.split(/(?<=\s)/);
   for (const token of tokens) {
     dataStream.write({ type: "text-delta", delta: token, id: textId });

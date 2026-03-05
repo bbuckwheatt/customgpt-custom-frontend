@@ -13,8 +13,7 @@ import {
   ARTIFACT_INSTRUCTIONS,
   CUSTOMGPT_API_KEY,
   CUSTOMGPT_PROJECT_ID,
-  emitParsedResponse,
-  fetchCustomGPTResponse,
+  streamCustomGPTToDataStream,
   uiMessagesToCustomGPT,
 } from "@/lib/ai/customgpt";
 import { isProductionEnvironment } from "@/lib/constants";
@@ -146,22 +145,17 @@ export async function POST(request: Request) {
           messageId: assistantMessageId,
         });
 
-        // Fetch full response from CustomGPT (collects the complete SSE stream)
-        const fullText = await fetchCustomGPTResponse({
+        // Stream response from CustomGPT, piping text deltas to the browser
+        // in real-time while buffering any <artifact> blocks for post-processing.
+        const fullText = await streamCustomGPTToDataStream({
           messages: [systemMessage, ...cgMessages],
           projectId: CUSTOMGPT_PROJECT_ID,
           apiKey: CUSTOMGPT_API_KEY,
-        });
-
-        assistantTextAccumulated = fullText;
-
-        // Parse for artifacts and write the appropriate stream events
-        await emitParsedResponse({
-          fullText,
-          messageId: assistantMessageId,
           dataStream,
           session,
         });
+
+        assistantTextAccumulated = fullText;
 
         dataStream.write({ type: "finish", finishReason: "stop" });
 
