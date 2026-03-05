@@ -29,6 +29,7 @@ import { ChatbotError } from "@/lib/errors";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
 import { Artifact } from "./artifact";
+import { DataStreamHandler } from "./data-stream-handler";
 import { useDataStream } from "./data-stream-provider";
 import { FileIcon, FullscreenIcon } from "./icons";
 import { Messages } from "./messages";
@@ -294,6 +295,8 @@ export function Chat({
         stop={stop}
         votes={votes}
       />
+
+      <DataStreamHandler />
 
       <AlertDialog
         onOpenChange={setShowCreditCardAlert}
