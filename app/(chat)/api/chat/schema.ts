@@ -29,10 +29,10 @@ const messageSchema = z.object({
 
 export const postRequestBodySchema = z.object({
   id: z.string().uuid(),
-  // Either a single new message or all messages (for tool approvals)
   message: userMessageSchema.optional(),
   messages: z.array(messageSchema).optional(),
-  selectedChatModel: z.string(),
+  // CustomGPT has a single agent; keep field for client compatibility
+  selectedChatModel: z.string().optional().default("customgpt/agent"),
   selectedVisibilityType: z.enum(["public", "private"]),
 });
 
