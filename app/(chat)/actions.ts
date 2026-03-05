@@ -1,10 +1,13 @@
 "use server";
 
-import { generateText, type UIMessage } from "ai";
+import { type UIMessage } from "ai";
 import { cookies } from "next/headers";
 import type { VisibilityType } from "@/components/visibility-selector";
-import { titlePrompt } from "@/lib/ai/prompts";
-import { getTitleModel } from "@/lib/ai/providers";
+import {
+  CUSTOMGPT_API_KEY,
+  CUSTOMGPT_PROJECT_ID,
+  fetchCustomGPTResponse,
+} from "@/lib/ai/customgpt";
 import {
   deleteMessagesByChatIdAfterTimestamp,
   getMessageById,
@@ -22,15 +25,24 @@ export async function generateTitleFromUserMessage({
 }: {
   message: UIMessage;
 }) {
-  const { text } = await generateText({
-    model: getTitleModel(),
-    system: titlePrompt,
-    prompt: getTextFromMessage(message),
+  const userText = getTextFromMessage(message);
+  const text = await fetchCustomGPTResponse({
+    messages: [
+      {
+        role: "system",
+        content:
+          "Generate a short chat title (2-5 words) summarizing the user message. Output ONLY the title text with no punctuation, prefixes, or formatting.",
+      },
+      { role: "user", content: userText },
+    ],
+    projectId: CUSTOMGPT_PROJECT_ID,
+    apiKey: CUSTOMGPT_API_KEY,
   });
   return text
     .replace(/^[#*"\s]+/, "")
     .replace(/["]+$/, "")
-    .trim();
+    .trim()
+    .slice(0, 80);
 }
 
 export async function deleteTrailingMessages({ id }: { id: string }) {
