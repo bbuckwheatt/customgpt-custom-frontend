@@ -9,10 +9,7 @@ import { DataStreamProvider } from "@/components/data-stream-provider";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { auth } from "../(auth)/auth";
 
-export default async function Layout({ children }: { children: React.ReactNode }) {
-  const cookieStore = await cookies();
-  const isCollapsed = cookieStore.get("sidebar_state")?.value !== "true";
-
+export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <>
       {/* Pyodide is only needed when running Python code in the artifact panel.
@@ -22,20 +19,32 @@ export default async function Layout({ children }: { children: React.ReactNode }
         strategy="lazyOnload"
       />
       <DataStreamProvider>
-        <SidebarProvider defaultOpen={!isCollapsed}>
-          {/* Sidebar shape renders synchronously from cookie; only the user data
-              (auth) suspends — the main content area is never blocked. */}
-          <Suspense fallback={<AppSidebarSkeleton />}>
-            <AppSidebarWithUser />
-          </Suspense>
-          <SidebarInset>{children}</SidebarInset>
-        </SidebarProvider>
+        {/* Fallback renders a sidebar skeleton + children in place so the layout
+            doesn't shift when auth/cookies resolve (CLS fix). defaultOpen keeps
+            the sidebar space reserved for the common case. */}
+        <Suspense
+          fallback={
+            <SidebarProvider defaultOpen>
+              <AppSidebarSkeleton />
+              <SidebarInset>{children}</SidebarInset>
+            </SidebarProvider>
+          }
+        >
+          <SidebarWrapper>{children}</SidebarWrapper>
+        </Suspense>
       </DataStreamProvider>
     </>
   );
 }
 
-async function AppSidebarWithUser() {
-  const session = await auth();
-  return <AppSidebar user={session?.user} />;
+async function SidebarWrapper({ children }: { children: React.ReactNode }) {
+  const [session, cookieStore] = await Promise.all([auth(), cookies()]);
+  const isCollapsed = cookieStore.get("sidebar_state")?.value !== "true";
+
+  return (
+    <SidebarProvider defaultOpen={!isCollapsed}>
+      <AppSidebar user={session?.user} />
+      <SidebarInset>{children}</SidebarInset>
+    </SidebarProvider>
+  );
 }
