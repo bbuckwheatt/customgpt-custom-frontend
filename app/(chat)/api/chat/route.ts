@@ -1,24 +1,22 @@
-import { geolocation, ipAddress } from "@vercel/functions";
+import { ipAddress } from "@vercel/functions";
 import {
-  convertToModelMessages,
   createUIMessageStream,
   createUIMessageStreamResponse,
   generateId,
-  stepCountIs,
-  streamText,
 } from "ai";
 import { checkBotId } from "botid/server";
 import { after } from "next/server";
 import { createResumableStreamContext } from "resumable-stream";
 import { auth, type UserType } from "@/app/(auth)/auth";
 import { entitlementsByUserType } from "@/lib/ai/entitlements";
-import { allowedModelIds } from "@/lib/ai/models";
-import { type RequestHints, systemPrompt } from "@/lib/ai/prompts";
-import { getLanguageModel } from "@/lib/ai/providers";
-import { createDocument } from "@/lib/ai/tools/create-document";
-import { getWeather } from "@/lib/ai/tools/get-weather";
-import { requestSuggestions } from "@/lib/ai/tools/request-suggestions";
-import { updateDocument } from "@/lib/ai/tools/update-document";
+import {
+  ARTIFACT_INSTRUCTIONS,
+  CUSTOMGPT_API_KEY,
+  CUSTOMGPT_PROJECT_ID,
+  emitParsedResponse,
+  fetchCustomGPTResponse,
+  uiMessagesToCustomGPT,
+} from "@/lib/ai/customgpt";
 import { isProductionEnvironment } from "@/lib/constants";
 import {
   createStreamId,
@@ -29,12 +27,10 @@ import {
   saveChat,
   saveMessages,
   updateChatTitleById,
-  updateMessage,
 } from "@/lib/db/queries";
 import type { DBMessage } from "@/lib/db/schema";
 import { ChatbotError } from "@/lib/errors";
 import { checkIpRateLimit } from "@/lib/ratelimit";
-import type { ChatMessage } from "@/lib/types";
 import { convertToUIMessages, generateUUID } from "@/lib/utils";
 import { generateTitleFromUserMessage } from "../../actions";
 import { type PostRequestBody, postRequestBodySchema } from "./schema";
@@ -62,8 +58,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { id, message, messages, selectedChatModel, selectedVisibilityType } =
-      requestBody;
+    const { id, message, selectedVisibilityType } = requestBody;
 
     const [botResult, session] = await Promise.all([checkBotId(), auth()]);
 
@@ -73,10 +68,6 @@ export async function POST(request: Request) {
 
     if (!session?.user) {
       return new ChatbotError("unauthorized:chat").toResponse();
-    }
-
-    if (!allowedModelIds.has(selectedChatModel)) {
-      return new ChatbotError("bad_request:api").toResponse();
     }
 
     await checkIpRateLimit(ipAddress(request));
@@ -92,8 +83,6 @@ export async function POST(request: Request) {
       return new ChatbotError("rate_limit:chat").toResponse();
     }
 
-    const isToolApprovalFlow = Boolean(messages);
-
     const chat = await getChatById({ id });
     let messagesFromDb: DBMessage[] = [];
     let titlePromise: Promise<string> | null = null;
@@ -102,9 +91,7 @@ export async function POST(request: Request) {
       if (chat.userId !== session.user.id) {
         return new ChatbotError("forbidden:chat").toResponse();
       }
-      if (!isToolApprovalFlow) {
-        messagesFromDb = await getMessagesByChatId({ id });
-      }
+      messagesFromDb = await getMessagesByChatId({ id });
     } else if (message?.role === "user") {
       await saveChat({
         id,
@@ -115,19 +102,9 @@ export async function POST(request: Request) {
       titlePromise = generateTitleFromUserMessage({ message });
     }
 
-    const uiMessages = isToolApprovalFlow
-      ? (messages as ChatMessage[])
-      : [...convertToUIMessages(messagesFromDb), message as ChatMessage];
+    const uiMessages = [...convertToUIMessages(messagesFromDb), message];
 
-    const { longitude, latitude, city, country } = geolocation(request);
-
-    const requestHints: RequestHints = {
-      longitude,
-      latitude,
-      city,
-      country,
-    };
-
+    // Save the incoming user message
     if (message?.role === "user") {
       await saveMessages({
         messages: [
@@ -143,52 +120,52 @@ export async function POST(request: Request) {
       });
     }
 
-    const isReasoningModel =
-      selectedChatModel.endsWith("-thinking") ||
-      (selectedChatModel.includes("reasoning") &&
-        !selectedChatModel.includes("non-reasoning"));
+    // Convert history to CustomGPT-compatible format
+    const cgMessages = uiMessagesToCustomGPT(
+      uiMessages.filter(Boolean) as Array<{
+        role: string;
+        parts: Array<{ type: string; text?: string }>;
+      }>
+    );
 
-    const modelMessages = await convertToModelMessages(uiMessages);
+    // Prepend the system message with artifact instructions
+    const systemMessage = {
+      role: "system" as const,
+      content: ARTIFACT_INSTRUCTIONS,
+    };
+
+    // Accumulate the assistant reply for DB persistence
+    let assistantTextAccumulated = "";
+    let assistantMessageId = generateUUID();
 
     const stream = createUIMessageStream({
-      originalMessages: isToolApprovalFlow ? uiMessages : undefined,
       execute: async ({ writer: dataStream }) => {
-        const result = streamText({
-          model: getLanguageModel(selectedChatModel),
-          system: systemPrompt({ selectedChatModel, requestHints }),
-          messages: modelMessages,
-          stopWhen: stepCountIs(5),
-          experimental_activeTools: isReasoningModel
-            ? []
-            : [
-                "getWeather",
-                "createDocument",
-                "updateDocument",
-                "requestSuggestions",
-              ],
-          providerOptions: isReasoningModel
-            ? {
-                anthropic: {
-                  thinking: { type: "enabled", budgetTokens: 10_000 },
-                },
-              }
-            : undefined,
-          tools: {
-            getWeather,
-            createDocument: createDocument({ session, dataStream }),
-            updateDocument: updateDocument({ session, dataStream }),
-            requestSuggestions: requestSuggestions({ session, dataStream }),
-          },
-          experimental_telemetry: {
-            isEnabled: isProductionEnvironment,
-            functionId: "stream-text",
-          },
+        // Emit stream-start so the SDK knows a new assistant message begins
+        dataStream.write({
+          type: "start",
+          messageId: assistantMessageId,
         });
 
-        dataStream.merge(
-          result.toUIMessageStream({ sendReasoning: isReasoningModel })
-        );
+        // Fetch full response from CustomGPT (collects the complete SSE stream)
+        const fullText = await fetchCustomGPTResponse({
+          messages: [systemMessage, ...cgMessages],
+          projectId: CUSTOMGPT_PROJECT_ID,
+          apiKey: CUSTOMGPT_API_KEY,
+        });
 
+        assistantTextAccumulated = fullText;
+
+        // Parse for artifacts and write the appropriate stream events
+        await emitParsedResponse({
+          fullText,
+          messageId: assistantMessageId,
+          dataStream,
+          session,
+        });
+
+        dataStream.write({ type: "finish", finishReason: "stop" });
+
+        // Generate and stream the chat title (first message only)
         if (titlePromise) {
           const title = await titlePromise;
           dataStream.write({ type: "data-chat-title", data: title });
@@ -197,35 +174,12 @@ export async function POST(request: Request) {
       },
       generateId: generateUUID,
       onFinish: async ({ messages: finishedMessages }) => {
-        if (isToolApprovalFlow) {
-          for (const finishedMsg of finishedMessages) {
-            const existingMsg = uiMessages.find((m) => m.id === finishedMsg.id);
-            if (existingMsg) {
-              await updateMessage({
-                id: finishedMsg.id,
-                parts: finishedMsg.parts,
-              });
-            } else {
-              await saveMessages({
-                messages: [
-                  {
-                    id: finishedMsg.id,
-                    role: finishedMsg.role,
-                    parts: finishedMsg.parts,
-                    createdAt: new Date(),
-                    attachments: [],
-                    chatId: id,
-                  },
-                ],
-              });
-            }
-          }
-        } else if (finishedMessages.length > 0) {
+        if (finishedMessages.length > 0) {
           await saveMessages({
-            messages: finishedMessages.map((currentMessage) => ({
-              id: currentMessage.id,
-              role: currentMessage.role,
-              parts: currentMessage.parts,
+            messages: finishedMessages.map((m) => ({
+              id: m.id,
+              role: m.role,
+              parts: m.parts,
               createdAt: new Date(),
               attachments: [],
               chatId: id,
@@ -233,25 +187,13 @@ export async function POST(request: Request) {
           });
         }
       },
-      onError: (error) => {
-        if (
-          error instanceof Error &&
-          error.message?.includes(
-            "AI Gateway requires a valid credit card on file to service requests"
-          )
-        ) {
-          return "AI Gateway requires a valid credit card on file to service requests. Please visit https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%3Fmodal%3Dadd-credit-card to add a card and unlock your free credits.";
-        }
-        return "Oops, an error occurred!";
-      },
+      onError: () => "Oops, an error occurred! Please try again.",
     });
 
     return createUIMessageStreamResponse({
       stream,
       async consumeSseStream({ stream: sseStream }) {
-        if (!process.env.REDIS_URL) {
-          return;
-        }
+        if (!process.env.REDIS_URL) return;
         try {
           const streamContext = getStreamContext();
           if (streamContext) {
@@ -274,16 +216,10 @@ export async function POST(request: Request) {
       return error.toResponse();
     }
 
-    if (
-      error instanceof Error &&
-      error.message?.includes(
-        "AI Gateway requires a valid credit card on file to service requests"
-      )
-    ) {
-      return new ChatbotError("bad_request:activate_gateway").toResponse();
+    if (isProductionEnvironment) {
+      console.error("Unhandled error in chat API:", error, { vercelId });
     }
 
-    console.error("Unhandled error in chat API:", error, { vercelId });
     return new ChatbotError("offline:chat").toResponse();
   }
 }
