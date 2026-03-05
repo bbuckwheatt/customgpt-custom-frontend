@@ -474,6 +474,20 @@ function PureModelSelectorCompact({
     chatModels.find((m) => m.id === selectedModelId) ??
     chatModels.find((m) => m.id === DEFAULT_CHAT_MODEL) ??
     chatModels[0];
+
+  // When there's only one model, show a non-interactive label
+  if (chatModels.length <= 1) {
+    return (
+      <Button
+        className="h-8 cursor-default px-2 text-muted-foreground hover:bg-transparent"
+        disabled
+        variant="ghost"
+      >
+        <ModelSelectorName>{selectedModel.name}</ModelSelectorName>
+      </Button>
+    );
+  }
+
   const [provider] = selectedModel.id.split("/");
 
   // Provider display names
@@ -483,6 +497,7 @@ function PureModelSelectorCompact({
     google: "Google",
     xai: "xAI",
     reasoning: "Reasoning",
+    customgpt: "CustomGPT",
   };
 
   return (
