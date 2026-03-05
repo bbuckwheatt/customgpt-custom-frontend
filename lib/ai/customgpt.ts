@@ -205,8 +205,15 @@ export async function streamCustomGPTToDataStream({
     dataStream.write({ type: "data-title", data: title, transient: true });
     dataStream.write({ type: "data-clear", data: null, transient: true });
 
+    const deltaType =
+      kind === "code"
+        ? "data-codeDelta"
+        : kind === "sheet"
+          ? "data-sheetDelta"
+          : "data-textDelta";
+
     for (const word of content.split(/(?<=\s)/)) {
-      dataStream.write({ type: "data-textDelta", data: word, transient: true });
+      dataStream.write({ type: deltaType, data: word, transient: true });
     }
 
     if (session?.user?.id) {
