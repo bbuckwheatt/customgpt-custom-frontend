@@ -1,21 +1,25 @@
 "use client";
 
-import { defaultMarkdownSerializer } from "prosemirror-markdown";
-import { DOMParser, type Node } from "prosemirror-model";
+import { defaultMarkdownParser, defaultMarkdownSerializer } from "prosemirror-markdown";
+import { type Node } from "prosemirror-model";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
-import { renderToString } from "react-dom/server";
-
-import { Response } from "@/components/elements/response";
 
 import { documentSchema } from "./config";
 import { createSuggestionWidget, type UISuggestion } from "./suggestions";
 
 export const buildDocumentFromContent = (content: string) => {
-  const parser = DOMParser.fromSchema(documentSchema);
-  const stringFromMarkdown = renderToString(<Response>{content}</Response>);
-  const tempContainer = document.createElement("div");
-  tempContainer.innerHTML = stringFromMarkdown;
-  return parser.parse(tempContainer);
+  try {
+    // Parse the markdown text using the default parser (synchronous, no React needed),
+    // then convert to our documentSchema via JSON round-trip. Both schemas share the
+    // same node/mark type names, so this is safe.
+    const parsed = defaultMarkdownParser.parse(content);
+    if (parsed) {
+      return documentSchema.nodeFromJSON(parsed.toJSON());
+    }
+  } catch {
+    // fall through to empty doc
+  }
+  return documentSchema.topNodeType.createAndFill()!;
 };
 
 export const buildContentFromDocument = (document: Node) => {
