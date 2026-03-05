@@ -17,7 +17,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useArtifactSelector } from "@/hooks/use-artifact";
+import { useArtifact, useArtifactSelector } from "@/hooks/use-artifact";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import type { Vote } from "@/lib/db/schema";
@@ -26,11 +26,44 @@ import type { Attachment, ChatMessage } from "@/lib/types";
 import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
 import { Artifact } from "./artifact";
 import { useDataStream } from "./data-stream-provider";
+import { FileIcon, FullscreenIcon } from "./icons";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 import { toast } from "./toast";
 import type { VisibilityType } from "./visibility-selector";
+
+function ArtifactReopener() {
+  const { artifact, setArtifact } = useArtifact();
+
+  if (artifact.documentId === "init" || artifact.isVisible) {
+    return null;
+  }
+
+  return (
+    <button
+      className="flex w-full items-center gap-2 rounded-xl border bg-muted px-3 py-2 text-left text-sm transition-colors hover:bg-accent dark:border-zinc-700"
+      onClick={(e) => {
+        const boundingBox = e.currentTarget.getBoundingClientRect();
+        setArtifact((a) => ({
+          ...a,
+          isVisible: true,
+          boundingBox: {
+            left: boundingBox.x,
+            top: boundingBox.y,
+            width: boundingBox.width,
+            height: boundingBox.height,
+          },
+        }));
+      }}
+      type="button"
+    >
+      <FileIcon size={14} />
+      <span className="flex-1 truncate font-medium">{artifact.title}</span>
+      <FullscreenIcon size={14} />
+    </button>
+  );
+}
 
 export function Chat({
   id,
@@ -216,7 +249,8 @@ export function Chat({
           votes={votes}
         />
 
-        <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4">
+        <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl flex-col gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4">
+          <ArtifactReopener />
           {!isReadonly && (
             <MultimodalInput
               attachments={attachments}
