@@ -34,6 +34,20 @@ import {
 } from "./ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
+export function AppSidebarSkeleton() {
+  return (
+    <Sidebar className="group-data-[side=left]:border-r-0">
+      <SidebarHeader>
+        <SidebarMenu>
+          <div className="flex h-8 items-center px-2">
+            <div className="h-5 w-16 animate-pulse rounded bg-muted" />
+          </div>
+        </SidebarMenu>
+      </SidebarHeader>
+    </Sidebar>
+  );
+}
+
 export function AppSidebar({ user }: { user: User | undefined }) {
   const router = useRouter();
   const { setOpenMobile } = useSidebar();

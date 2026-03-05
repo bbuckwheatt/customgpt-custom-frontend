@@ -20,13 +20,13 @@ export const viewport = {
 
 const geist = Geist({
   subsets: ["latin"],
-  display: "swap",
+  display: "optional",
   variable: "--font-geist",
 });
 
 const geistMono = Geist_Mono({
   subsets: ["latin"],
-  display: "swap",
+  display: "optional",
   variable: "--font-geist-mono",
 });
 
