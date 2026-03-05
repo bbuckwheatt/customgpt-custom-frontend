@@ -44,14 +44,15 @@ Rules:
 `;
 
 /**
- * Streams text from CustomGPT to the UI in real-time while detecting and
- * buffering <artifact> blocks (which are processed after the stream closes).
+ * Streams text from CustomGPT to the UI in real-time, detecting <artifact>
+ * blocks inline as they arrive so artifact content is streamed live rather
+ * than delivered in a burst after the full response completes.
  *
- * - Text before any <artifact> tag → text-start / text-delta events in real-time
- * - <artifact>...</artifact>       → buffered, then emitted as data-* artifact events
- * - Text after </artifact>         → emitted as text-delta events after artifact
- *
- * Returns the full accumulated response text.
+ * Phases:
+ *  plain    → stream text deltas, watch for <artifact
+ *  open-tag → buffer <artifact ...> until >, parse attrs, emit open events
+ *  content  → stream artifact deltas, watch for </artifact>
+ *  done     → stream any trailing text after </artifact>
  */
 export async function streamCustomGPTToDataStream({
   messages,
@@ -91,17 +92,14 @@ export async function streamCustomGPTToDataStream({
   if (!reader) throw new Error("No response body from CustomGPT");
 
   const ARTIFACT_OPEN = "<artifact";
+  const ARTIFACT_CLOSE = "</artifact>";
   const decoder = new TextDecoder();
   let sseBuf = "";
   let accumulated = "";
 
-  // Text streaming state
+  // ── Text streaming ──────────────────────────────────────────────────────
   const textId = generateUUID();
   let textStarted = false;
-  // Text held back to check whether it's the beginning of an <artifact tag
-  let held = "";
-  // Once we see <artifact, stop flushing text immediately
-  let artifactMode = false;
 
   const emitText = (text: string) => {
     if (!text) return;
@@ -112,44 +110,125 @@ export async function streamCustomGPTToDataStream({
     dataStream.write({ type: "text-delta", delta: text, id: textId });
   };
 
-  /**
-   * Tries to flush as much of `held` as possible as text-delta events,
-   * while keeping back any suffix that could be the start of "<artifact".
-   */
-  const tryFlush = (incoming: string) => {
-    if (artifactMode) return;
-    held += incoming;
+  // ── Artifact streaming ──────────────────────────────────────────────────
+  type Phase = "plain" | "open-tag" | "content" | "done";
+  let phase: Phase = "plain";
+  let held = "";       // plain-phase hold-back for potential <artifact prefix
+  let openTagBuf = ""; // accumulates <artifact ...> until >
+  let closeBuf = "";   // content-phase lookahead for </artifact>
+  let artifactKind: ArtifactKind = "text";
+  let artifactTitle = "";
+  let artifactDocId = "";
+  let artifactContent = ""; // accumulates full content for DB save
 
-    // Check for a complete <artifact opening in what we've buffered
-    const idx = held.indexOf(ARTIFACT_OPEN);
-    if (idx !== -1) {
-      const before = held.slice(0, idx);
-      if (before) emitText(before);
-      held = "";
-      artifactMode = true;
+  const getDeltaType = (): "data-textDelta" | "data-codeDelta" | "data-sheetDelta" =>
+    artifactKind === "code"
+      ? "data-codeDelta"
+      : artifactKind === "sheet"
+        ? "data-sheetDelta"
+        : "data-textDelta";
+
+  const emitContentDelta = (text: string) => {
+    if (!text) return;
+    for (const word of text.split(/(?<=\s)/)) {
+      dataStream.write({ type: getDeltaType(), data: word, transient: true });
+    }
+    artifactContent += text;
+  };
+
+  // Stream artifact content, holding back enough to detect </artifact>
+  const processContentChunk = (chunk: string) => {
+    closeBuf += chunk;
+
+    const closeIdx = closeBuf.indexOf(ARTIFACT_CLOSE);
+    if (closeIdx !== -1) {
+      if (closeIdx > 0) emitContentDelta(closeBuf.slice(0, closeIdx));
+      const afterClose = closeBuf.slice(closeIdx + ARTIFACT_CLOSE.length).trim();
+      closeBuf = "";
+      phase = "done";
+      if (afterClose) emitText(afterClose);
       return;
     }
 
-    // Check if the tail of `held` is a partial prefix of ARTIFACT_OPEN.
-    // If so, keep that suffix buffered; flush everything before it.
+    // Hold back enough to detect a partial </artifact> match at the tail
+    let safeTo = closeBuf.length;
+    for (let i = Math.min(closeBuf.length, ARTIFACT_CLOSE.length - 1); i >= 1; i--) {
+      if (ARTIFACT_CLOSE.startsWith(closeBuf.slice(-i))) {
+        safeTo = closeBuf.length - i;
+        break;
+      }
+    }
+    if (safeTo > 0) {
+      emitContentDelta(closeBuf.slice(0, safeTo));
+      closeBuf = closeBuf.slice(safeTo);
+    }
+  };
+
+  // Accumulate opening tag until >, then parse attrs and start artifact
+  const processOpenTagChunk = (chunk: string) => {
+    openTagBuf += chunk;
+    const gtIdx = openTagBuf.indexOf(">");
+    if (gtIdx === -1) return;
+
+    const tag = openTagBuf.slice(0, gtIdx + 1);
+    const rest = openTagBuf.slice(gtIdx + 1);
+    openTagBuf = "";
+
+    const typeMatch = /type="(text|code|sheet)"/.exec(tag);
+    const titleMatch = /title="([^"]*)"/.exec(tag);
+    artifactKind = (typeMatch?.[1] ?? "text") as ArtifactKind;
+    artifactTitle = titleMatch?.[1]?.trim() ?? "";
+    artifactDocId = generateUUID();
+
+    const fallbackTitle =
+      artifactKind === "code" ? "Code Snippet"
+      : artifactKind === "sheet" ? "Spreadsheet"
+      : "Document";
+
+    dataStream.write({ type: "data-kind", data: artifactKind, transient: true });
+    dataStream.write({ type: "data-id", data: artifactDocId, transient: true });
+    dataStream.write({ type: "data-title", data: artifactTitle || fallbackTitle, transient: true });
+    dataStream.write({ type: "data-clear", data: null, transient: true });
+
+    phase = "content";
+    if (rest) processContentChunk(rest);
+  };
+
+  // Route each incoming chunk to the appropriate phase handler
+  const handleChunk = (delta: string) => {
+    accumulated += delta;
+
+    if (phase === "done") { emitText(delta); return; }
+    if (phase === "content") { processContentChunk(delta); return; }
+    if (phase === "open-tag") { processOpenTagChunk(delta); return; }
+
+    // phase === "plain": stream text, watch for <artifact
+    held += delta;
+    const idx = held.indexOf(ARTIFACT_OPEN);
+    if (idx !== -1) {
+      if (idx > 0) emitText(held.slice(0, idx));
+      const rest = held.slice(idx);
+      held = "";
+      phase = "open-tag";
+      processOpenTagChunk(rest);
+      return;
+    }
+
+    // Hold back potential partial <artifact prefix
     let safeTo = held.length;
-    for (
-      let i = Math.min(held.length, ARTIFACT_OPEN.length - 1);
-      i >= 1;
-      i--
-    ) {
+    for (let i = Math.min(held.length, ARTIFACT_OPEN.length - 1); i >= 1; i--) {
       if (ARTIFACT_OPEN.startsWith(held.slice(-i))) {
         safeTo = held.length - i;
         break;
       }
     }
-
     if (safeTo > 0) {
       emitText(held.slice(0, safeTo));
       held = held.slice(safeTo);
     }
   };
 
+  // ── SSE reading loop ────────────────────────────────────────────────────
   outer: while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -167,64 +246,35 @@ export async function streamCustomGPTToDataStream({
       try {
         const chunk = JSON.parse(payload);
         const delta = chunk.choices?.[0]?.delta?.content;
-        if (typeof delta === "string") {
-          accumulated += delta;
-          tryFlush(delta);
-        }
+        if (typeof delta === "string") handleChunk(delta);
       } catch {
         // skip malformed chunks
       }
     }
   }
 
-  // Flush any remaining held text (only possible when no artifact was found)
-  if (!artifactMode && held) {
-    emitText(held);
-  }
+  // ── Flush remaining buffers ─────────────────────────────────────────────
+  if (phase === "plain" && held) emitText(held);
+  // Stream ended mid-artifact without </artifact> — emit whatever we have
+  if (phase === "content" && closeBuf) emitContentDelta(closeBuf);
 
   if (textStarted) {
     dataStream.write({ type: "text-end", id: textId });
   }
 
-  // --- Post-stream artifact processing ---
-  const artifactRe =
-    /<artifact\s+type="(text|code|sheet)"(?:\s+language="([^"]*)")?(?:\s+title="([^"]*)")?[^>]*>([\s\S]*?)<\/artifact>/i;
-  const match = artifactRe.exec(accumulated);
-
-  if (match) {
-    const [fullMatch, rawType, , rawTitle, rawContent] = match;
-    const afterArtifact = accumulated.slice(match.index + fullMatch.length).trim();
-
-    const kind = rawType as ArtifactKind;
-    const content = rawContent.trim();
-    const title = rawTitle?.trim() || deriveTitle(content, kind);
-    const docId = generateUUID();
-
-    dataStream.write({ type: "data-kind", data: kind, transient: true });
-    dataStream.write({ type: "data-id", data: docId, transient: true });
-    dataStream.write({ type: "data-title", data: title, transient: true });
-    dataStream.write({ type: "data-clear", data: null, transient: true });
-
-    const deltaType =
-      kind === "code"
-        ? "data-codeDelta"
-        : kind === "sheet"
-          ? "data-sheetDelta"
-          : "data-textDelta";
-
-    for (const word of content.split(/(?<=\s)/)) {
-      dataStream.write({ type: deltaType, data: word, transient: true });
-    }
-
+  // ── Finalize artifact ───────────────────────────────────────────────────
+  if (phase === "content" || phase === "done") {
+    if (!artifactTitle) artifactTitle = deriveTitle(artifactContent, artifactKind);
     if (session?.user?.id) {
-      await saveDocument({ id: docId, title, content, kind, userId: session.user.id });
+      await saveDocument({
+        id: artifactDocId,
+        title: artifactTitle,
+        content: artifactContent,
+        kind: artifactKind,
+        userId: session.user.id,
+      });
     }
-
     dataStream.write({ type: "data-finish", data: null, transient: true });
-
-    if (afterArtifact) {
-      writeTextChunk(dataStream, afterArtifact);
-    }
   }
 
   return accumulated;
