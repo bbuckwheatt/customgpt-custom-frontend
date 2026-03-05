@@ -254,16 +254,19 @@ export async function streamCustomGPTToDataStream({
   }
 
   // ── Flush remaining buffers ─────────────────────────────────────────────
-  if (phase === "plain" && held) emitText(held);
+  // Cast needed: TS narrows `phase` to "plain" after the loop because it
+  // doesn't track mutations made by the inner closures.
+  const finalPhase = phase as Phase;
+  if (finalPhase === "plain" && held) emitText(held);
   // Stream ended mid-artifact without </artifact> — emit whatever we have
-  if (phase === "content" && closeBuf) emitContentDelta(closeBuf);
+  if (finalPhase === "content" && closeBuf) emitContentDelta(closeBuf);
 
   if (textStarted) {
     dataStream.write({ type: "text-end", id: textId });
   }
 
   // ── Finalize artifact ───────────────────────────────────────────────────
-  if (phase === "content" || phase === "done") {
+  if (finalPhase === "content" || finalPhase === "done") {
     if (!artifactTitle) artifactTitle = deriveTitle(artifactContent, artifactKind);
     if (session?.user?.id) {
       await saveDocument({
