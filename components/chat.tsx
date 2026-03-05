@@ -17,7 +17,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useArtifact, useArtifactSelector } from "@/hooks/use-artifact";
+import {
+  initialArtifactData,
+  useArtifact,
+  useArtifactSelector,
+} from "@/hooks/use-artifact";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import type { Vote } from "@/lib/db/schema";
@@ -99,6 +103,14 @@ export function Chat({
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, [router]);
+  const { setArtifact } = useArtifact();
+
+  // Reset artifact state when switching conversations so the reopener chip
+  // from a previous chat doesn't bleed into the new chat.
+  useEffect(() => {
+    setArtifact(initialArtifactData);
+  }, [id, setArtifact]);
+
   const { setDataStream } = useDataStream();
 
   const [input, setInput] = useState<string>("");
