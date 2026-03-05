@@ -58,6 +58,7 @@ function PureMultimodalInput({
   input,
   setInput,
   status,
+  isRateLimited,
   stop,
   attachments,
   setAttachments,
@@ -73,6 +74,7 @@ function PureMultimodalInput({
   input: string;
   setInput: Dispatch<SetStateAction<string>>;
   status: UseChatHelpers<ChatMessage>["status"];
+  isRateLimited?: boolean;
   stop: () => void;
   attachments: Attachment[];
   setAttachments: Dispatch<SetStateAction<Attachment[]>>;
@@ -324,7 +326,13 @@ function PureMultimodalInput({
             return;
           }
           if (status !== "ready") {
-            toast.error("Please wait for the model to finish its response!");
+            if (isRateLimited) {
+              toast.error(
+                "You have exceeded your maximum number of messages for the day. Please try again later."
+              );
+            } else {
+              toast.error("Please wait for the model to finish its response!");
+            }
           } else {
             submitForm();
           }

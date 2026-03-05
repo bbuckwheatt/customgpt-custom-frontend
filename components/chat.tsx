@@ -70,6 +70,7 @@ export function Chat({
 
   const [input, setInput] = useState<string>("");
   const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
+  const [isRateLimited, setIsRateLimited] = useState(false);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
 
@@ -135,10 +136,17 @@ export function Chat({
       setDataStream((ds) => (ds ? [...ds, dataPart] : []));
     },
     onFinish: () => {
+      setIsRateLimited(false);
       mutate(unstable_serialize(getChatHistoryPaginationKey));
     },
     onError: (error) => {
-      if (error.message?.includes("AI Gateway requires a valid credit card")) {
+      if (error instanceof ChatbotError && error.type === "rate_limit") {
+        setIsRateLimited(true);
+        toast({
+          type: "error",
+          description: error.message,
+        });
+      } else if (error.message?.includes("AI Gateway requires a valid credit card")) {
         setShowCreditCardAlert(true);
       } else if (error instanceof ChatbotError) {
         toast({
@@ -214,6 +222,7 @@ export function Chat({
               attachments={attachments}
               chatId={id}
               input={input}
+              isRateLimited={isRateLimited}
               messages={messages}
               onModelChange={setCurrentModelId}
               selectedModelId={currentModelId}
