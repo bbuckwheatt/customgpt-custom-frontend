@@ -1,4 +1,3 @@
-import { ipAddress } from "@vercel/functions";
 import {
   createUIMessageStream,
   createUIMessageStreamResponse,
@@ -29,7 +28,6 @@ import {
 } from "@/lib/db/queries";
 import type { DBMessage } from "@/lib/db/schema";
 import { ChatbotError } from "@/lib/errors";
-import { checkIpRateLimit } from "@/lib/ratelimit";
 import { convertToUIMessages, generateUUID } from "@/lib/utils";
 import { generateTitleFromUserMessage } from "../../actions";
 import { type PostRequestBody, postRequestBodySchema } from "./schema";
@@ -68,8 +66,6 @@ export async function POST(request: Request) {
     if (!session?.user) {
       return new ChatbotError("unauthorized:chat").toResponse();
     }
-
-    await checkIpRateLimit(ipAddress(request));
 
     const userType: UserType = session.user.type;
 
