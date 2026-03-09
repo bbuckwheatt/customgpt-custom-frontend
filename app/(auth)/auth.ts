@@ -8,7 +8,10 @@ import { authConfig } from "./auth.config";
 
 export type UserType = "guest" | "regular" | "admin";
 
-const ADMIN_EMAILS = ["cameron@customgpt.ai"];
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS ?? "")
+  .split(",")
+  .map((e) => e.trim())
+  .filter(Boolean);
 
 declare module "next-auth" {
   interface Session extends DefaultSession {

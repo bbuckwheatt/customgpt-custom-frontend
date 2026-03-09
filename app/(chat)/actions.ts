@@ -3,6 +3,7 @@
 import { type UIMessage } from "ai";
 import { cookies } from "next/headers";
 import type { VisibilityType } from "@/components/visibility-selector";
+import { auth } from "@/app/(auth)/auth";
 import {
   CUSTOMGPT_API_KEY,
   CUSTOMGPT_PROJECT_ID,
@@ -10,6 +11,7 @@ import {
 } from "@/lib/ai/customgpt";
 import {
   deleteMessagesByChatIdAfterTimestamp,
+  getChatById,
   getMessageById,
   updateChatVisibilityById,
 } from "@/lib/db/queries";
@@ -46,7 +48,14 @@ export async function generateTitleFromUserMessage({
 }
 
 export async function deleteTrailingMessages({ id }: { id: string }) {
+  const session = await auth();
+  if (!session?.user) return;
+
   const [message] = await getMessageById({ id });
+  if (!message) return;
+
+  const chat = await getChatById({ id: message.chatId });
+  if (chat?.userId !== session.user.id) return;
 
   await deleteMessagesByChatIdAfterTimestamp({
     chatId: message.chatId,
@@ -61,5 +70,11 @@ export async function updateChatVisibility({
   chatId: string;
   visibility: VisibilityType;
 }) {
+  const session = await auth();
+  if (!session?.user) return;
+
+  const chat = await getChatById({ id: chatId });
+  if (chat?.userId !== session.user.id) return;
+
   await updateChatVisibilityById({ chatId, visibility });
 }

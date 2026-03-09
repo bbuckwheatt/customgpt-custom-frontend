@@ -5,7 +5,10 @@ import { isDevelopmentEnvironment } from "@/lib/constants";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const redirectUrl = searchParams.get("redirectUrl") || "/";
+  const raw = searchParams.get("redirectUrl") || "/";
+  // Only allow relative same-origin paths — block open-redirect to external URLs.
+  // A valid relative path starts with "/" but not "//" (which browsers treat as protocol-relative).
+  const redirectUrl = raw.startsWith("/") && !raw.startsWith("//") ? raw : "/";
 
   const token = await getToken({
     req: request,

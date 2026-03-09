@@ -9,7 +9,20 @@ const filePartSchema = z.object({
   type: z.enum(["file"]),
   mediaType: z.enum(["image/jpeg", "image/png"]),
   name: z.string().min(1).max(100),
-  url: z.string().url(),
+  url: z
+    .string()
+    .url()
+    .refine(
+      (url) => {
+        try {
+          const { hostname } = new URL(url);
+          return hostname.endsWith(".public.blob.vercel-storage.com");
+        } catch {
+          return false;
+        }
+      },
+      { message: "File URL must be a Vercel Blob Storage URL" }
+    ),
 });
 
 const partSchema = z.union([textPartSchema, filePartSchema]);

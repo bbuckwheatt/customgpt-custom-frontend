@@ -46,12 +46,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: errorMessage }, { status: 400 });
     }
 
-    // Get filename from formData since Blob doesn't have name property
-    const filename = (formData.get("file") as File).name;
+    // Get filename from formData since Blob doesn't have name property.
+    // Sanitize and scope under user ID to prevent path traversal and cross-user conflicts.
+    const rawName = (formData.get("file") as File).name;
+    const safeName = rawName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100);
+    const filename = `${session.user.id}/${safeName}`;
     const fileBuffer = await file.arrayBuffer();
 
     try {
-      const data = await put(`${filename}`, fileBuffer, {
+      const data = await put(filename, fileBuffer, {
         access: "public",
       });
 
