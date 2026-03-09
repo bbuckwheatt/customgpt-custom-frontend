@@ -1,5 +1,4 @@
 import { cookies } from "next/headers";
-import Script from "next/script";
 import { Suspense } from "react";
 import {
   AppSidebar,
@@ -12,12 +11,6 @@ import { auth } from "../(auth)/auth";
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <>
-      {/* Pyodide is only needed when running Python code in the artifact panel.
-          lazyOnload defers it to browser idle time so it never blocks render. */}
-      <Script
-        src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"
-        strategy="lazyOnload"
-      />
       <DataStreamProvider>
         {/* Fallback renders a sidebar skeleton + children in place so the layout
             doesn't shift when auth/cookies resolve (CLS fix). defaultOpen keeps
@@ -35,6 +28,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </DataStreamProvider>
     </>
   );
+
 }
 
 async function SidebarWrapper({ children }: { children: React.ReactNode }) {
