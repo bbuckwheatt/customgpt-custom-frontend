@@ -8,10 +8,33 @@ import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 import { SessionProvider } from "next-auth/react";
 
+const appUrl =
+  process.env.NEXT_PUBLIC_APP_URL ??
+  (process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : "http://localhost:3000");
+
 export const metadata: Metadata = {
-  metadataBase: new URL("https://chat.vercel.ai"),
-  title: "Next.js Chatbot Template",
-  description: "Next.js chatbot template using the AI SDK.",
+  metadataBase: new URL(appUrl),
+  title: {
+    default: "CustomGPT Chat",
+    template: "%s | CustomGPT Chat",
+  },
+  description:
+    "Chat with your CustomGPT AI agent — powered by your own data and knowledge base.",
+  openGraph: {
+    type: "website",
+    siteName: "CustomGPT Chat",
+    title: "CustomGPT Chat",
+    description:
+      "Chat with your CustomGPT AI agent — powered by your own data and knowledge base.",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "CustomGPT Chat",
+    description:
+      "Chat with your CustomGPT AI agent — powered by your own data and knowledge base.",
+  },
 };
 
 export const viewport = {
