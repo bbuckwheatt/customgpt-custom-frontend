@@ -20,6 +20,14 @@ A production-ready chat frontend for deploying your [CustomGPT](https://customgp
 
 ---
 
+## Why This Stack
+
+CustomGPT turns any document collection, website, or knowledge base into a production-ready AI agent — complete with a configured persona, source citations, and guardrails — without ML engineering. Vercel provides the deployment and runtime layer that makes that agent customer-facing: globally distributed serverless compute, a managed storage ecosystem, and built-in observability. The combination means a business can go from a curated knowledge base to a fully branded, auth-gated chat product — with conversation history, tiered access, and real-time streaming responses — without owning infrastructure or training a model. Time-to-launch is measured in days rather than quarters, and operating costs track usage rather than reserved capacity.
+
+The architecture draws a deliberate line between what is resolved on the server and what runs in the browser. Pages that depend on persisted data are assembled before the first byte reaches the client, eliminating the round-trip waterfall that client-fetching would require; only the parts of the UI that genuinely need interactivity — the message input, live token delivery, artifact editing — run in the browser. Incoming response tokens are forwarded incrementally as they arrive from CustomGPT, and a loading indicator bridges the submission-to-first-token gap so users never face a blank response area; authentication resolution is isolated in a narrow deferred boundary so the sidebar is sized correctly from the first painted frame, removing layout shift. Shared mutable state — artifact content and status — lives in a per-conversation client cache so any component can read or update it without prop drilling, and optimistic mutations are reconciled against server-confirmed versions once the stream closes. Each dependency was chosen to pay for its own complexity: the AI SDK abstracts the streaming wire protocol, a typed ORM makes schema changes auditable, and JWT-based sessions avoid an external identity provider. Vercel's platform handles distribution, compression, and TLS automatically; native integrations with Neon Postgres, Blob storage, and Upstash Redis provision and scale without configuration; and real-user performance telemetry gives visibility into load and layout regressions before they affect end users.
+
+---
+
 ## Architecture
 
 ```
