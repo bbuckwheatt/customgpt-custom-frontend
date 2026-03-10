@@ -8,37 +8,26 @@ import { DataStreamProvider } from "@/components/data-stream-provider";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { auth } from "../(auth)/auth";
 
-export default function Layout({ children }: { children: React.ReactNode }) {
-  return (
-    <>
-      <DataStreamProvider>
-        {/* Fallback renders a sidebar skeleton + children in place so the layout
-            doesn't shift when auth/cookies resolve (CLS fix). defaultOpen keeps
-            the sidebar space reserved for the common case. */}
-        <Suspense
-          fallback={
-            <SidebarProvider defaultOpen>
-              <AppSidebarSkeleton />
-              <SidebarInset>{children}</SidebarInset>
-            </SidebarProvider>
-          }
-        >
-          <SidebarWrapper>{children}</SidebarWrapper>
-        </Suspense>
-      </DataStreamProvider>
-    </>
-  );
-
-}
-
-async function SidebarWrapper({ children }: { children: React.ReactNode }) {
-  const [session, cookieStore] = await Promise.all([auth(), cookies()]);
+export default async function Layout({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies();
+  // Read sidebar state from cookie so the space-reserving div is sized
+  // correctly from the very first byte — eliminates sidebar-width CLS.
   const isCollapsed = cookieStore.get("sidebar_state")?.value !== "true";
 
   return (
-    <SidebarProvider defaultOpen={!isCollapsed}>
-      <AppSidebar user={session?.user} />
-      <SidebarInset>{children}</SidebarInset>
-    </SidebarProvider>
+    <DataStreamProvider>
+      <SidebarProvider defaultOpen={!isCollapsed}>
+        {/* Only auth resolution is deferred; sidebar space is already correct */}
+        <Suspense fallback={<AppSidebarSkeleton />}>
+          <AuthedSidebar />
+        </Suspense>
+        <SidebarInset>{children}</SidebarInset>
+      </SidebarProvider>
+    </DataStreamProvider>
   );
+}
+
+async function AuthedSidebar() {
+  const session = await auth();
+  return <AppSidebar user={session?.user} />;
 }
