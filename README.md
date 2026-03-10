@@ -33,12 +33,12 @@ Server (API routes — Node.js runtime)
   ├── POST /api/chat             Core handler: auth → rate limit → CustomGPT stream
   ├── GET  /api/history          Paginated conversation list (SWR infinite)
   ├── GET  /api/document         Artifact document fetch (SWR)
-  └── POST /api/files/upload     Blob upload
+  └── POST /api/files/upload     Blob upload (API only; upload UI is disabled by default)
 
 Data layer
   ├── Neon Postgres (Drizzle ORM)  Users, chats, messages, documents, votes
   ├── Vercel Blob                  File attachments
-  └── Redis                        IP-based rate limit counters (production only)
+  └── Redis                        Resumable stream state (production only)
 
 External
   └── CustomGPT API               SSE streaming, agent persona + knowledge base
@@ -56,16 +56,16 @@ The SDK handles the browser-side streaming protocol (chunked fetch, message part
 No SDK wrapper needed — a standard `fetch` with `Accept: text/event-stream` is sufficient. The server buffers artifact XML blocks while forwarding plain text deltas in real time, then emits structured artifact events after the stream closes. This keeps latency low for conversational responses while still supporting rich artifact output.
 
 **Auth.js (credentials + guest)**
-JWT-based sessions with no external OAuth dependency. The guest provider auto-creates an anonymous account in the database, giving unauthenticated users access to conversation history within a session while still being subject to rate limits. Admin status is determined by a hardcoded email allowlist at sign-in time and stored in the JWT.
+JWT-based sessions with no external OAuth dependency. The guest provider auto-creates an anonymous account in the database, giving unauthenticated users access to conversation history within a session while still being subject to rate limits. Admin status is determined by the `ADMIN_EMAILS` environment variable (comma-separated email addresses) at sign-in time and stored in the JWT.
 
 **Drizzle ORM + Neon Postgres**
 Type-safe schema with auto-generated migrations. Messages are stored as structured JSON `parts` arrays (Vercel AI SDK v6 format), making it straightforward to replay full conversations back to CustomGPT.
 
-**Redis for rate limiting**
-A single `INCR` + `EXPIRE NX` pipeline per request provides atomic, TTL-rolling counters with no race conditions. Redis is only consulted in production; local development skips it entirely.
+**Redis for stream resumption**
+When `REDIS_URL` is set, each streaming response is registered as a resumable stream. If a client disconnects mid-stream it can reconnect and pick up where it left off. Redis is only consulted in production; local development skips it entirely.
 
 **SWR for artifact state**
-Artifact content, kind, and status live in SWR's cache rather than component state. This means any component in the tree can read or update artifact state without prop drilling, and optimistic mutations during streaming are automatically reconciled with server-fetched versions once streaming ends.
+Artifact content, kind, and status live in SWR's cache keyed per chat (e.g. `artifact-{chatId}`) rather than component state. This means any component in the tree can read or update artifact state without prop drilling, isolates artifact state across conversations, and ensures optimistic mutations during streaming are automatically reconciled with server-fetched versions once streaming ends.
 
 ---
 
@@ -74,7 +74,7 @@ Artifact content, kind, and status live in SWR's cache rather than component sta
 ```
 ├── app/
 │   ├── (auth)/
-│   │   ├── auth.ts                  NextAuth config, user type resolution, admin list
+│   │   ├── auth.ts                  NextAuth config, user type resolution, ADMIN_EMAILS env var
 │   │   ├── auth.config.ts           Auth callbacks and route config
 │   │   ├── actions.ts               Server actions: login, register, guest sign-in
 │   │   ├── login/page.tsx           Login page
@@ -83,7 +83,7 @@ Artifact content, kind, and status live in SWR's cache rather than component sta
 │   │       ├── [...nextauth]/       NextAuth API handler
 │   │       └── guest/               Guest session creation endpoint
 │   ├── (chat)/
-│   │   ├── page.tsx                 Home — redirects to new chat
+│   │   ├── page.tsx                 Home — renders new chat UI directly
 │   │   ├── layout.tsx               Chat shell layout (sidebar + main)
 │   │   ├── actions.ts               Server actions: save chat, delete chat, save document
 │   │   ├── chat/[id]/page.tsx       Individual chat page (server-rendered)
@@ -95,7 +95,7 @@ Artifact content, kind, and status live in SWR's cache rather than component sta
 │   │       ├── document/route.ts    Document CRUD
 │   │       ├── suggestions/         Inline suggestion API
 │   │       ├── vote/                Message vote API
-│   │       └── files/upload/        Blob file upload
+│   │       └── files/upload/        Blob file upload (API; UI button disabled by default)
 │   ├── globals.css
 │   └── layout.tsx                   Root layout (fonts, theme provider)
 │
@@ -141,12 +141,12 @@ Artifact content, kind, and status live in SWR's cache rather than component sta
 │   │   ├── config.ts                ProseMirror schema definition
 │   │   ├── functions.tsx            ★ buildDocumentFromContent (markdown → ProseMirror)
 │   │   └── suggestions.tsx          Inline suggestion decorations
-│   ├── ratelimit.ts                 ★ Redis IP-based rate limiting
+│   ├── ratelimit.ts                 Redis IP-based rate limit helper (unused — IP limiting removed)
 │   ├── errors.ts                    Typed ChatbotError with error codes
 │   └── types.ts                     ChatMessage, CustomUIDataTypes, tool types
 │
 ├── hooks/
-│   ├── use-artifact.ts              SWR-backed artifact state
+│   ├── use-artifact.ts              SWR-backed artifact state, scoped per chat ID
 │   ├── use-auto-resume.ts           Stream resumption on reconnect
 │   ├── use-chat-visibility.ts       Public/private chat toggle
 │   └── use-messages.tsx             Message list with vote state
@@ -165,6 +165,9 @@ Artifact content, kind, and status live in SWR's cache rather than component sta
 # Authentication
 AUTH_SECRET=          # Random secret — generate with: openssl rand -base64 32
 
+# Admin access
+ADMIN_EMAILS=         # Comma-separated admin email addresses (e.g. you@example.com)
+
 # CustomGPT
 CUSTOMGPT_API_KEY=    # API key from app.customgpt.ai → Profile → API
 CUSTOMGPT_PROJECT_ID= # Agent/project ID from the URL when viewing your agent
@@ -175,7 +178,7 @@ POSTGRES_URL=         # Neon (or any Postgres) connection string
 # File storage
 BLOB_READ_WRITE_TOKEN= # Vercel Blob token
 
-# Rate limiting (production only — omit to disable)
+# Stream resumption (production only — omit to disable)
 REDIS_URL=            # Redis connection string
 ```
 
@@ -189,7 +192,7 @@ pnpm db:migrate   # Create tables
 pnpm dev          # Starts on http://localhost:3000
 ```
 
-> Redis rate limiting is automatically disabled when `NODE_ENV !== "production"` or when `REDIS_URL` is not set.
+> Redis stream resumption is automatically disabled when `NODE_ENV !== "production"` or when `REDIS_URL` is not set.
 
 ## Deploying
 
