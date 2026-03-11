@@ -135,7 +135,13 @@ export async function streamCustomGPTToDataStream({
       dataStream.write({ type: "text-start", id: textId });
       textStarted = true;
     }
-    dataStream.write({ type: "text-delta", delta: text, id: textId });
+    // Split into words (keeping whitespace attached) so large chunks
+    // from CustomGPT trickle out word-by-word instead of all at once.
+    for (const word of text.split(/(?<=\s)/)) {
+      if (word) {
+        dataStream.write({ type: "text-delta", delta: word, id: textId });
+      }
+    }
   };
 
   // ── Artifact streaming ──────────────────────────────────────────────────
