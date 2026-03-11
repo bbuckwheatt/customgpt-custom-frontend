@@ -77,7 +77,7 @@ export async function POST(request: Request) {
 
     const chat = await getChatById({ id });
     let sessionId: string | null = null;
-    let titlePromise: Promise<string> | null = null;
+    let chatTitle: string | null = null;
 
     if (chat) {
       if (chat.userId !== session.user.id) {
@@ -100,7 +100,7 @@ export async function POST(request: Request) {
         sessionId,
       });
 
-      titlePromise = generateTitleFromUserMessage({ message });
+      chatTitle = generateTitleFromUserMessage({ message });
     }
 
     if (!sessionId) {
@@ -146,11 +146,10 @@ export async function POST(request: Request) {
 
         dataStream.write({ type: "finish", finishReason: "stop" });
 
-        // Generate and stream the chat title (first message only)
-        if (titlePromise) {
-          const title = await titlePromise;
-          dataStream.write({ type: "data-chat-title", data: title });
-          updateChatTitleById({ chatId: id, title });
+        // Update the chat title (first message only)
+        if (chatTitle) {
+          dataStream.write({ type: "data-chat-title", data: chatTitle });
+          updateChatTitleById({ chatId: id, title: chatTitle });
         }
       },
       generateId: generateUUID,

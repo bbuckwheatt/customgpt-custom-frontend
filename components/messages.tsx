@@ -43,6 +43,24 @@ function PureMessages({
 
   useDataStream();
 
+  // True once an assistant message has visible text content.
+  const hasAssistantText = messages.some(
+    (msg) =>
+      msg.role === "assistant" &&
+      msg.parts?.some(
+        (part) => part.type === "text" && "text" in part && part.text
+      )
+  );
+
+  // Show thinking indicator until first text arrives.
+  const showThinking =
+    (status === "submitted" || (status === "streaming" && !hasAssistantText)) &&
+    !messages.some((msg) =>
+      msg.parts?.some(
+        (part) => "state" in part && part.state === "approval-responded"
+      )
+    );
+
   return (
     <div className="relative flex-1 bg-background">
       <div
@@ -52,44 +70,46 @@ function PureMessages({
         <div className="mx-auto flex min-w-0 max-w-4xl flex-col gap-4 px-2 py-4 md:gap-6 md:px-4">
           {messages.length === 0 && <Greeting />}
 
-          {messages.map((message, index) => (
-            <PreviewMessage
-              addToolApprovalResponse={addToolApprovalResponse}
-              chatId={chatId}
-              isLoading={
-                status === "streaming" && messages.length - 1 === index
-              }
-              isReadonly={isReadonly}
-              key={message.id}
-              message={message}
-              regenerate={regenerate}
-              requiresScrollPadding={
-                hasSentMessage && index === messages.length - 1
-              }
-              setMessages={setMessages}
-              vote={
-                votes
-                  ? votes.find((vote) => vote.messageId === message.id)
-                  : undefined
-              }
-            />
-          ))}
-
-          {(status === "submitted" ||
-            (status === "streaming" &&
-              !messages.some(
-                (msg) =>
-                  msg.role === "assistant" &&
-                  msg.parts?.some(
-                    (part) =>
-                      part.type === "text" && "text" in part && part.text
-                  )
-              ))) &&
-            !messages.some((msg) =>
-              msg.parts?.some(
-                (part) => "state" in part && part.state === "approval-responded"
+          {messages.map((message, index) => {
+            // Hide the empty assistant message while we're still showing
+            // the thinking indicator — prevents the double-icon.
+            const isLastMsg = index === messages.length - 1;
+            if (
+              isLastMsg &&
+              showThinking &&
+              message.role === "assistant" &&
+              !message.parts?.some(
+                (p) => p.type === "text" && "text" in p && p.text
               )
-            ) && <ThinkingMessage />}
+            ) {
+              return null;
+            }
+
+            return (
+              <PreviewMessage
+                addToolApprovalResponse={addToolApprovalResponse}
+                chatId={chatId}
+                isLoading={
+                  status === "streaming" && messages.length - 1 === index
+                }
+                isReadonly={isReadonly}
+                key={message.id}
+                message={message}
+                regenerate={regenerate}
+                requiresScrollPadding={
+                  hasSentMessage && index === messages.length - 1
+                }
+                setMessages={setMessages}
+                vote={
+                  votes
+                    ? votes.find((vote) => vote.messageId === message.id)
+                    : undefined
+                }
+              />
+            );
+          })}
+
+          {showThinking && <ThinkingMessage />}
 
           <div
             className="min-h-[24px] min-w-[24px] shrink-0"

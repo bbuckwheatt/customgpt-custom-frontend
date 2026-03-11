@@ -5,11 +5,6 @@ import { cookies } from "next/headers";
 import { auth } from "@/app/(auth)/auth";
 import type { VisibilityType } from "@/components/visibility-selector";
 import {
-  CUSTOMGPT_API_KEY,
-  CUSTOMGPT_PROJECT_ID,
-  fetchCustomGPTResponse,
-} from "@/lib/ai/customgpt";
-import {
   deleteMessagesByChatIdAfterTimestamp,
   getChatById,
   getMessageById,
@@ -22,29 +17,17 @@ export async function saveChatModelAsCookie(model: string) {
   cookieStore.set("chat-model", model);
 }
 
-export async function generateTitleFromUserMessage({
+export function generateTitleFromUserMessage({
   message,
 }: {
   message: UIMessage;
 }) {
   const userText = getTextFromMessage(message);
-  const text = await fetchCustomGPTResponse({
-    messages: [
-      {
-        role: "system",
-        content:
-          "Generate a short chat title (2-5 words) summarizing the user message. Output ONLY the title text with no punctuation, prefixes, or formatting.",
-      },
-      { role: "user", content: userText },
-    ],
-    projectId: CUSTOMGPT_PROJECT_ID,
-    apiKey: CUSTOMGPT_API_KEY,
-  });
-  return text
-    .replace(/^[#*"\s]+/, "")
-    .replace(/["]+$/, "")
-    .trim()
-    .slice(0, 80);
+  // Derive title from first line of user message — no API call needed.
+  const firstLine = userText.split("\n")[0]?.trim() ?? "";
+  const title =
+    firstLine.length > 50 ? `${firstLine.slice(0, 47)}...` : firstLine;
+  return title || "New chat";
 }
 
 export async function deleteTrailingMessages({ id }: { id: string }) {
