@@ -101,7 +101,7 @@ export async function streamCustomGPTToDataStream({
       Accept: "text/event-stream",
     },
     body: JSON.stringify({
-      message,
+      prompt: message,
       custom_context: ARTIFACT_INSTRUCTIONS,
     }),
     signal,
