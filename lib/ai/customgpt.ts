@@ -12,76 +12,100 @@ export const CUSTOMGPT_API_KEY = process.env.CUSTOMGPT_API_KEY ?? "";
 export type ArtifactKind = "text" | "code" | "sheet";
 
 /**
- * These instructions get injected as the system message so CustomGPT knows
- * how to emit artifacts that we can parse and render in the artifact panel.
- *
- * They extend (not replace) the agent's own configured persona.
+ * Artifact output instructions sent via custom_context per message
+ * so CustomGPT knows how to emit artifacts we can parse and render.
  */
-export const ARTIFACT_INSTRUCTIONS = `
-ARTIFACT OUTPUT RULES — follow exactly:
-When producing substantial content (code, documents, spreadsheets >10 lines), wrap it in XML artifact tags:
-
-Code:
-<artifact type="code" language="python" title="Descriptive Title">
-...code...
-</artifact>
-
-Text document / essay / email:
-<artifact type="text" title="Descriptive Title">
-...content...
-</artifact>
-
-Spreadsheet / CSV table:
-<artifact type="sheet" title="Descriptive Title">
-...csv data...
-</artifact>
-
-Rules:
-- Maximum ONE artifact per response
-- Put any explanation or commentary AFTER the closing </artifact> tag
-- Short inline examples do NOT need artifact tags
-- Always include a descriptive title attribute
-`;
+export const ARTIFACT_INSTRUCTIONS = `For substantial content (>10 lines), use artifact tags:
+Code: <artifact type="code" language="python" title="Title">code</artifact>
+Text: <artifact type="text" title="Title">content</artifact>
+Sheet: <artifact type="sheet" title="Title">csv</artifact>
+Max ONE artifact per response. Commentary goes AFTER </artifact>. Short inline examples need no tags. Always include title.`;
 
 /**
- * Streams text from CustomGPT to the UI in real-time, detecting <artifact>
- * blocks inline as they arrive so artifact content is streamed live rather
- * than delivered in a burst after the full response completes.
+ * Creates a new conversation in CustomGPT and returns the session ID.
+ */
+export async function createConversation({
+  projectId = CUSTOMGPT_PROJECT_ID,
+  apiKey = CUSTOMGPT_API_KEY,
+  name,
+}: {
+  projectId?: string;
+  apiKey?: string;
+  name?: string;
+} = {}): Promise<string> {
+  const response = await fetch(
+    `${CUSTOMGPT_API_BASE}/projects/${projectId}/conversations`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: name ?? "New chat" }),
+    }
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `CustomGPT create conversation error ${response.status}: ${text}`
+    );
+  }
+
+  const json = await response.json();
+  const sessionId = json?.data?.session_id;
+  if (!sessionId) {
+    throw new Error("No session_id returned from CustomGPT conversation API");
+  }
+  return sessionId;
+}
+
+/**
+ * Streams text from CustomGPT's native conversation API to the UI in
+ * real-time, detecting <artifact> blocks inline as they arrive.
  *
- * Phases:
- *  plain    → stream text deltas, watch for <artifact
- *  open-tag → buffer <artifact ...> until >, parse attrs, emit open events
- *  content  → stream artifact deltas, watch for </artifact>
- *  done     → stream any trailing text after </artifact>
+ * Uses: POST /projects/{projectId}/conversations/{sessionId}/messages?stream=true
+ *
+ * SSE format:
+ *   event: start    → {"status":"start","prompt":"..."}
+ *   event: progress → {"status":"progress","message":"..."} (text delta)
+ *   event: finish   → {"status":"finish","id":...,"session_id":"...","citations":[]}
  */
 export async function streamCustomGPTToDataStream({
-  messages,
+  message,
+  sessionId,
   projectId = CUSTOMGPT_PROJECT_ID,
   apiKey = CUSTOMGPT_API_KEY,
   signal,
   dataStream,
   session,
 }: {
-  messages: Array<{ role: string; content: string }>;
+  message: string;
+  sessionId: string;
   projectId?: string;
   apiKey?: string;
   signal?: AbortSignal;
   dataStream: UIMessageStreamWriter<ChatMessage>;
   session: Session;
 }): Promise<string> {
-  const response = await fetch(
-    `${CUSTOMGPT_API_BASE}/projects/${projectId}/chat/completions`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-      },
-      body: JSON.stringify({ messages, stream: true }),
-      signal,
-    }
+  const url = new URL(
+    `${CUSTOMGPT_API_BASE}/projects/${projectId}/conversations/${sessionId}/messages`
   );
+  url.searchParams.set("stream", "true");
+
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify({
+      message,
+      custom_context: ARTIFACT_INSTRUCTIONS,
+    }),
+    signal,
+  });
 
   if (!response.ok) {
     const text = await response.text();
@@ -117,13 +141,13 @@ export async function streamCustomGPTToDataStream({
   // ── Artifact streaming ──────────────────────────────────────────────────
   type Phase = "plain" | "open-tag" | "content" | "done";
   let phase: Phase = "plain";
-  let held = ""; // plain-phase hold-back for potential <artifact prefix
-  let openTagBuf = ""; // accumulates <artifact ...> until >
-  let closeBuf = ""; // content-phase lookahead for </artifact>
+  let held = "";
+  let openTagBuf = "";
+  let closeBuf = "";
   let artifactKind: ArtifactKind = "text";
   let artifactTitle = "";
   let artifactDocId = "";
-  let artifactContent = ""; // accumulates full content for DB save
+  let artifactContent = "";
 
   const getDeltaType = ():
     | "data-textDelta"
@@ -145,7 +169,6 @@ export async function streamCustomGPTToDataStream({
     artifactContent += text;
   };
 
-  // Stream artifact content, holding back enough to detect </artifact>
   const processContentChunk = (chunk: string) => {
     closeBuf += chunk;
 
@@ -165,7 +188,6 @@ export async function streamCustomGPTToDataStream({
       return;
     }
 
-    // Hold back enough to detect a partial </artifact> match at the tail
     let safeTo = closeBuf.length;
     for (
       let i = Math.min(closeBuf.length, ARTIFACT_CLOSE.length - 1);
@@ -183,7 +205,6 @@ export async function streamCustomGPTToDataStream({
     }
   };
 
-  // Accumulate opening tag until >, then parse attrs and start artifact
   const processOpenTagChunk = (chunk: string) => {
     openTagBuf += chunk;
     const gtIdx = openTagBuf.indexOf(">");
@@ -227,7 +248,6 @@ export async function streamCustomGPTToDataStream({
     }
   };
 
-  // Route each incoming chunk to the appropriate phase handler
   const handleChunk = (delta: string) => {
     accumulated += delta;
 
@@ -244,7 +264,6 @@ export async function streamCustomGPTToDataStream({
       return;
     }
 
-    // phase === "plain": stream text, watch for <artifact
     held += delta;
     const idx = held.indexOf(ARTIFACT_OPEN);
     if (idx !== -1) {
@@ -258,7 +277,6 @@ export async function streamCustomGPTToDataStream({
       return;
     }
 
-    // Hold back potential partial <artifact prefix
     let safeTo = held.length;
     for (let i = Math.min(held.length, ARTIFACT_OPEN.length - 1); i >= 1; i--) {
       if (ARTIFACT_OPEN.startsWith(held.slice(-i))) {
@@ -272,7 +290,8 @@ export async function streamCustomGPTToDataStream({
     }
   };
 
-  // ── SSE reading loop ────────────────────────────────────────────────────
+  // ── SSE reading loop (native CustomGPT format) ─────────────────────────
+  let currentEvent = "";
   outer: while (true) {
     const { done, value } = await reader.read();
     if (done) {
@@ -285,19 +304,30 @@ export async function streamCustomGPTToDataStream({
 
     for (const line of lines) {
       const trimmed = line.trim();
+
+      if (trimmed.startsWith("event: ")) {
+        currentEvent = trimmed.slice(7);
+        continue;
+      }
+
       if (!trimmed.startsWith("data: ")) {
         continue;
       }
+
       const payload = trimmed.slice(6);
-      if (payload === "[DONE]") {
-        break outer;
-      }
 
       try {
         const chunk = JSON.parse(payload);
-        const delta = chunk.choices?.[0]?.delta?.content;
-        if (typeof delta === "string") {
-          handleChunk(delta);
+
+        if (currentEvent === "finish" || chunk.status === "finish") {
+          break outer;
+        }
+
+        if (
+          (currentEvent === "progress" || chunk.status === "progress") &&
+          typeof chunk.message === "string"
+        ) {
+          handleChunk(chunk.message);
         }
       } catch {
         // skip malformed chunks
@@ -306,13 +336,10 @@ export async function streamCustomGPTToDataStream({
   }
 
   // ── Flush remaining buffers ─────────────────────────────────────────────
-  // Cast needed: TS narrows `phase` to "plain" after the loop because it
-  // doesn't track mutations made by the inner closures.
   const finalPhase = phase as Phase;
   if (finalPhase === "plain" && held) {
     emitText(held);
   }
-  // Stream ended mid-artifact without </artifact> — emit whatever we have
   if (finalPhase === "content" && closeBuf) {
     emitContentDelta(closeBuf);
   }
@@ -425,42 +452,24 @@ async function readSSEStream(response: Response): Promise<string> {
   return fullText;
 }
 
-/** Writes a text string as text-start → text-delta(s) → text-end events. */
-function _writeTextChunk(
-  dataStream: UIMessageStreamWriter<ChatMessage>,
-  text: string
-) {
-  const textId = generateUUID();
-  dataStream.write({ type: "text-start", id: textId });
-
-  const tokens = text.split(/(?<=\s)/);
-  for (const token of tokens) {
-    dataStream.write({ type: "text-delta", delta: token, id: textId });
-  }
-
-  dataStream.write({ type: "text-end", id: textId });
-}
-
 /**
- * Converts UI messages to the simple role/content format CustomGPT expects.
- * Strips tool invocation parts (artifact panels) — only text is sent.
+ * Extracts the text content from the last user message in UI format.
  */
-export function uiMessagesToCustomGPT(
+export function getLastUserMessageText(
   messages: Array<{
     role: string;
     parts: Array<{ type: string; text?: string }>;
   }>
-): Array<{ role: string; content: string }> {
-  return messages
-    .filter((m) => m.role === "user" || m.role === "assistant")
-    .map((m) => ({
-      role: m.role,
-      content: m.parts
-        .filter((p) => p.type === "text")
-        .map((p) => p.text ?? "")
-        .join(""),
-    }))
-    .filter((m) => m.content.trim().length > 0);
+): string {
+  const userMessages = messages.filter((m) => m.role === "user");
+  const last = userMessages.at(-1);
+  if (!last) {
+    return "";
+  }
+  return last.parts
+    .filter((p) => p.type === "text")
+    .map((p) => p.text ?? "")
+    .join("");
 }
 
 function deriveTitle(content: string, kind: ArtifactKind): string {

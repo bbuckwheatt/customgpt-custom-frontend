@@ -83,11 +83,13 @@ export async function saveChat({
   userId,
   title,
   visibility,
+  sessionId,
 }: {
   id: string;
   userId: string;
   title: string;
   visibility: VisibilityType;
+  sessionId?: string | null;
 }) {
   try {
     return await db.insert(chat).values({
@@ -96,6 +98,7 @@ export async function saveChat({
       userId,
       title,
       visibility,
+      sessionId,
     });
   } catch (_error) {
     throw new ChatbotError("bad_request:database", "Failed to save chat");
@@ -510,6 +513,23 @@ export async function updateChatVisibilityById({
     throw new ChatbotError(
       "bad_request:database",
       "Failed to update chat visibility by id"
+    );
+  }
+}
+
+export async function updateChatSessionId({
+  chatId,
+  sessionId,
+}: {
+  chatId: string;
+  sessionId: string;
+}) {
+  try {
+    return await db.update(chat).set({ sessionId }).where(eq(chat.id, chatId));
+  } catch (_error) {
+    throw new ChatbotError(
+      "bad_request:database",
+      "Failed to update chat session id"
     );
   }
 }

@@ -8,11 +8,10 @@ import { after } from "next/server";
 import { createResumableStreamContext } from "resumable-stream";
 import { auth, type UserType } from "@/app/(auth)/auth";
 import {
-  ARTIFACT_INSTRUCTIONS,
   CUSTOMGPT_API_KEY,
   CUSTOMGPT_PROJECT_ID,
+  createConversation,
   streamCustomGPTToDataStream,
-  uiMessagesToCustomGPT,
 } from "@/lib/ai/customgpt";
 import { entitlementsByUserType } from "@/lib/ai/entitlements";
 import { isProductionEnvironment } from "@/lib/constants";
@@ -21,14 +20,12 @@ import {
   deleteChatById,
   getChatById,
   getMessageCountByUserId,
-  getMessagesByChatId,
   saveChat,
   saveMessages,
   updateChatTitleById,
 } from "@/lib/db/queries";
-import type { DBMessage } from "@/lib/db/schema";
 import { ChatbotError } from "@/lib/errors";
-import { convertToUIMessages, generateUUID } from "@/lib/utils";
+import { generateUUID, getTextFromMessage } from "@/lib/utils";
 import { generateTitleFromUserMessage } from "../../actions";
 import { type PostRequestBody, postRequestBodySchema } from "./schema";
 
@@ -79,25 +76,36 @@ export async function POST(request: Request) {
     }
 
     const chat = await getChatById({ id });
-    let messagesFromDb: DBMessage[] = [];
+    let sessionId: string | null = null;
     let titlePromise: Promise<string> | null = null;
 
     if (chat) {
       if (chat.userId !== session.user.id) {
         return new ChatbotError("forbidden:chat").toResponse();
       }
-      messagesFromDb = await getMessagesByChatId({ id });
+      sessionId = chat.sessionId;
     } else if (message?.role === "user") {
+      // New chat: create a CustomGPT conversation to get a session ID
+      sessionId = await createConversation({
+        projectId: CUSTOMGPT_PROJECT_ID,
+        apiKey: CUSTOMGPT_API_KEY,
+        name: "New chat",
+      });
+
       await saveChat({
         id,
         userId: session.user.id,
         title: "New chat",
         visibility: selectedVisibilityType,
+        sessionId,
       });
+
       titlePromise = generateTitleFromUserMessage({ message });
     }
 
-    const uiMessages = [...convertToUIMessages(messagesFromDb), message];
+    if (!sessionId) {
+      return new ChatbotError("bad_request:api").toResponse();
+    }
 
     // Save the incoming user message
     if (message?.role === "user") {
@@ -115,43 +123,26 @@ export async function POST(request: Request) {
       });
     }
 
-    // Convert history to CustomGPT-compatible format
-    const cgMessages = uiMessagesToCustomGPT(
-      uiMessages.filter(Boolean) as Array<{
-        role: string;
-        parts: Array<{ type: string; text?: string }>;
-      }>
-    );
+    // Extract the user's message text to send to CustomGPT
+    const userText = message ? getTextFromMessage(message) : "";
 
-    // Prepend the system message with artifact instructions
-    const systemMessage = {
-      role: "system" as const,
-      content: ARTIFACT_INSTRUCTIONS,
-    };
-
-    // Accumulate the assistant reply for DB persistence
-    let _assistantTextAccumulated = "";
     const assistantMessageId = generateUUID();
 
     const stream = createUIMessageStream({
       execute: async ({ writer: dataStream }) => {
-        // Emit stream-start so the SDK knows a new assistant message begins
         dataStream.write({
           type: "start",
           messageId: assistantMessageId,
         });
 
-        // Stream response from CustomGPT, piping text deltas to the browser
-        // in real-time while buffering any <artifact> blocks for post-processing.
-        const fullText = await streamCustomGPTToDataStream({
-          messages: [systemMessage, ...cgMessages],
+        await streamCustomGPTToDataStream({
+          message: userText,
+          sessionId: sessionId!,
           projectId: CUSTOMGPT_PROJECT_ID,
           apiKey: CUSTOMGPT_API_KEY,
           dataStream,
           session,
         });
-
-        _assistantTextAccumulated = fullText;
 
         dataStream.write({ type: "finish", finishReason: "stop" });
 
