@@ -17,7 +17,7 @@ export async function saveChatModelAsCookie(model: string) {
   cookieStore.set("chat-model", model);
 }
 
-export function generateTitleFromUserMessage({
+export async function generateTitleFromUserMessage({
   message,
 }: {
   message: UIMessage;
