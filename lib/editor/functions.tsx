@@ -1,7 +1,10 @@
 "use client";
 
-import { defaultMarkdownParser, defaultMarkdownSerializer } from "prosemirror-markdown";
-import { type Node } from "prosemirror-model";
+import {
+  defaultMarkdownParser,
+  defaultMarkdownSerializer,
+} from "prosemirror-markdown";
+import type { Node } from "prosemirror-model";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 
 import { documentSchema } from "./config";

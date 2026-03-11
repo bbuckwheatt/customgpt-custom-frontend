@@ -89,7 +89,9 @@ export async function streamCustomGPTToDataStream({
   }
 
   const reader = response.body?.getReader();
-  if (!reader) throw new Error("No response body from CustomGPT");
+  if (!reader) {
+    throw new Error("No response body from CustomGPT");
+  }
 
   const ARTIFACT_OPEN = "<artifact";
   const ARTIFACT_CLOSE = "</artifact>";
@@ -102,7 +104,9 @@ export async function streamCustomGPTToDataStream({
   let textStarted = false;
 
   const emitText = (text: string) => {
-    if (!text) return;
+    if (!text) {
+      return;
+    }
     if (!textStarted) {
       dataStream.write({ type: "text-start", id: textId });
       textStarted = true;
@@ -113,15 +117,18 @@ export async function streamCustomGPTToDataStream({
   // ── Artifact streaming ──────────────────────────────────────────────────
   type Phase = "plain" | "open-tag" | "content" | "done";
   let phase: Phase = "plain";
-  let held = "";       // plain-phase hold-back for potential <artifact prefix
+  let held = ""; // plain-phase hold-back for potential <artifact prefix
   let openTagBuf = ""; // accumulates <artifact ...> until >
-  let closeBuf = "";   // content-phase lookahead for </artifact>
+  let closeBuf = ""; // content-phase lookahead for </artifact>
   let artifactKind: ArtifactKind = "text";
   let artifactTitle = "";
   let artifactDocId = "";
   let artifactContent = ""; // accumulates full content for DB save
 
-  const getDeltaType = (): "data-textDelta" | "data-codeDelta" | "data-sheetDelta" =>
+  const getDeltaType = ():
+    | "data-textDelta"
+    | "data-codeDelta"
+    | "data-sheetDelta" =>
     artifactKind === "code"
       ? "data-codeDelta"
       : artifactKind === "sheet"
@@ -129,7 +136,9 @@ export async function streamCustomGPTToDataStream({
         : "data-textDelta";
 
   const emitContentDelta = (text: string) => {
-    if (!text) return;
+    if (!text) {
+      return;
+    }
     for (const word of text.split(/(?<=\s)/)) {
       dataStream.write({ type: getDeltaType(), data: word, transient: true });
     }
@@ -142,17 +151,27 @@ export async function streamCustomGPTToDataStream({
 
     const closeIdx = closeBuf.indexOf(ARTIFACT_CLOSE);
     if (closeIdx !== -1) {
-      if (closeIdx > 0) emitContentDelta(closeBuf.slice(0, closeIdx));
-      const afterClose = closeBuf.slice(closeIdx + ARTIFACT_CLOSE.length).trim();
+      if (closeIdx > 0) {
+        emitContentDelta(closeBuf.slice(0, closeIdx));
+      }
+      const afterClose = closeBuf
+        .slice(closeIdx + ARTIFACT_CLOSE.length)
+        .trim();
       closeBuf = "";
       phase = "done";
-      if (afterClose) emitText(afterClose);
+      if (afterClose) {
+        emitText(afterClose);
+      }
       return;
     }
 
     // Hold back enough to detect a partial </artifact> match at the tail
     let safeTo = closeBuf.length;
-    for (let i = Math.min(closeBuf.length, ARTIFACT_CLOSE.length - 1); i >= 1; i--) {
+    for (
+      let i = Math.min(closeBuf.length, ARTIFACT_CLOSE.length - 1);
+      i >= 1;
+      i--
+    ) {
       if (ARTIFACT_CLOSE.startsWith(closeBuf.slice(-i))) {
         safeTo = closeBuf.length - i;
         break;
@@ -168,7 +187,9 @@ export async function streamCustomGPTToDataStream({
   const processOpenTagChunk = (chunk: string) => {
     openTagBuf += chunk;
     const gtIdx = openTagBuf.indexOf(">");
-    if (gtIdx === -1) return;
+    if (gtIdx === -1) {
+      return;
+    }
 
     const tag = openTagBuf.slice(0, gtIdx + 1);
     const rest = openTagBuf.slice(gtIdx + 1);
@@ -181,32 +202,55 @@ export async function streamCustomGPTToDataStream({
     artifactDocId = generateUUID();
 
     const fallbackTitle =
-      artifactKind === "code" ? "Code Snippet"
-      : artifactKind === "sheet" ? "Spreadsheet"
-      : "Document";
+      artifactKind === "code"
+        ? "Code Snippet"
+        : artifactKind === "sheet"
+          ? "Spreadsheet"
+          : "Document";
 
-    dataStream.write({ type: "data-kind", data: artifactKind, transient: true });
+    dataStream.write({
+      type: "data-kind",
+      data: artifactKind,
+      transient: true,
+    });
     dataStream.write({ type: "data-id", data: artifactDocId, transient: true });
-    dataStream.write({ type: "data-title", data: artifactTitle || fallbackTitle, transient: true });
+    dataStream.write({
+      type: "data-title",
+      data: artifactTitle || fallbackTitle,
+      transient: true,
+    });
     dataStream.write({ type: "data-clear", data: null, transient: true });
 
     phase = "content";
-    if (rest) processContentChunk(rest);
+    if (rest) {
+      processContentChunk(rest);
+    }
   };
 
   // Route each incoming chunk to the appropriate phase handler
   const handleChunk = (delta: string) => {
     accumulated += delta;
 
-    if (phase === "done") { emitText(delta); return; }
-    if (phase === "content") { processContentChunk(delta); return; }
-    if (phase === "open-tag") { processOpenTagChunk(delta); return; }
+    if (phase === "done") {
+      emitText(delta);
+      return;
+    }
+    if (phase === "content") {
+      processContentChunk(delta);
+      return;
+    }
+    if (phase === "open-tag") {
+      processOpenTagChunk(delta);
+      return;
+    }
 
     // phase === "plain": stream text, watch for <artifact
     held += delta;
     const idx = held.indexOf(ARTIFACT_OPEN);
     if (idx !== -1) {
-      if (idx > 0) emitText(held.slice(0, idx));
+      if (idx > 0) {
+        emitText(held.slice(0, idx));
+      }
       const rest = held.slice(idx);
       held = "";
       phase = "open-tag";
@@ -231,7 +275,9 @@ export async function streamCustomGPTToDataStream({
   // ── SSE reading loop ────────────────────────────────────────────────────
   outer: while (true) {
     const { done, value } = await reader.read();
-    if (done) break;
+    if (done) {
+      break;
+    }
 
     sseBuf += decoder.decode(value, { stream: true });
     const lines = sseBuf.split("\n");
@@ -239,14 +285,20 @@ export async function streamCustomGPTToDataStream({
 
     for (const line of lines) {
       const trimmed = line.trim();
-      if (!trimmed.startsWith("data: ")) continue;
+      if (!trimmed.startsWith("data: ")) {
+        continue;
+      }
       const payload = trimmed.slice(6);
-      if (payload === "[DONE]") break outer;
+      if (payload === "[DONE]") {
+        break outer;
+      }
 
       try {
         const chunk = JSON.parse(payload);
         const delta = chunk.choices?.[0]?.delta?.content;
-        if (typeof delta === "string") handleChunk(delta);
+        if (typeof delta === "string") {
+          handleChunk(delta);
+        }
       } catch {
         // skip malformed chunks
       }
@@ -257,9 +309,13 @@ export async function streamCustomGPTToDataStream({
   // Cast needed: TS narrows `phase` to "plain" after the loop because it
   // doesn't track mutations made by the inner closures.
   const finalPhase = phase as Phase;
-  if (finalPhase === "plain" && held) emitText(held);
+  if (finalPhase === "plain" && held) {
+    emitText(held);
+  }
   // Stream ended mid-artifact without </artifact> — emit whatever we have
-  if (finalPhase === "content" && closeBuf) emitContentDelta(closeBuf);
+  if (finalPhase === "content" && closeBuf) {
+    emitContentDelta(closeBuf);
+  }
 
   if (textStarted) {
     dataStream.write({ type: "text-end", id: textId });
@@ -267,7 +323,9 @@ export async function streamCustomGPTToDataStream({
 
   // ── Finalize artifact ───────────────────────────────────────────────────
   if (finalPhase === "content" || finalPhase === "done") {
-    if (!artifactTitle) artifactTitle = deriveTitle(artifactContent, artifactKind);
+    if (!artifactTitle) {
+      artifactTitle = deriveTitle(artifactContent, artifactKind);
+    }
     if (session?.user?.id) {
       await saveDocument({
         id: artifactDocId,
@@ -323,7 +381,9 @@ export async function fetchCustomGPTResponse({
 /** Reads an OpenAI-format SSE stream and returns the concatenated content. */
 async function readSSEStream(response: Response): Promise<string> {
   const reader = response.body?.getReader();
-  if (!reader) throw new Error("No response body from CustomGPT");
+  if (!reader) {
+    throw new Error("No response body from CustomGPT");
+  }
 
   const decoder = new TextDecoder();
   let lineBuf = "";
@@ -331,7 +391,9 @@ async function readSSEStream(response: Response): Promise<string> {
 
   while (true) {
     const { done, value } = await reader.read();
-    if (done) break;
+    if (done) {
+      break;
+    }
 
     lineBuf += decoder.decode(value, { stream: true });
     const lines = lineBuf.split("\n");
@@ -339,15 +401,21 @@ async function readSSEStream(response: Response): Promise<string> {
 
     for (const line of lines) {
       const trimmed = line.trim();
-      if (!trimmed.startsWith("data: ")) continue;
+      if (!trimmed.startsWith("data: ")) {
+        continue;
+      }
 
       const payload = trimmed.slice(6);
-      if (payload === "[DONE]") return fullText;
+      if (payload === "[DONE]") {
+        return fullText;
+      }
 
       try {
         const chunk = JSON.parse(payload);
         const delta = chunk.choices?.[0]?.delta?.content;
-        if (typeof delta === "string") fullText += delta;
+        if (typeof delta === "string") {
+          fullText += delta;
+        }
       } catch {
         // skip malformed chunks
       }
@@ -358,7 +426,7 @@ async function readSSEStream(response: Response): Promise<string> {
 }
 
 /** Writes a text string as text-start → text-delta(s) → text-end events. */
-function writeTextChunk(
+function _writeTextChunk(
   dataStream: UIMessageStreamWriter<ChatMessage>,
   text: string
 ) {
@@ -398,10 +466,10 @@ export function uiMessagesToCustomGPT(
 function deriveTitle(content: string, kind: ArtifactKind): string {
   const first = content.split("\n")[0]?.trim() ?? "";
   if (kind === "code") {
-    return first.startsWith("#")
-      ? first.replace(/^#+\s*/, "")
-      : "Code Snippet";
+    return first.startsWith("#") ? first.replace(/^#+\s*/, "") : "Code Snippet";
   }
-  if (kind === "sheet") return "Spreadsheet";
+  if (kind === "sheet") {
+    return "Spreadsheet";
+  }
   return first.length > 0 && first.length <= 60 ? first : "Document";
 }

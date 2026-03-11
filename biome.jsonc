@@ -29,11 +29,13 @@
         "noExplicitAny": "off",
         "noUnknownAtRules": "off",
         "noConsole": "off",
-        "noBitwiseOperators": "off"
+        "noBitwiseOperators": "off",
+        "noShadowRestrictedNames": "off"
       },
       "style": {
         "noMagicNumbers": "off",
         "noNestedTernary": "off",
+        "noNonNullAssertion": "off",
         "useConsistentTypeDefinitions": "off"
       },
       "nursery": {

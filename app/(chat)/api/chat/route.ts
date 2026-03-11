@@ -7,7 +7,6 @@ import { checkBotId } from "botid/server";
 import { after } from "next/server";
 import { createResumableStreamContext } from "resumable-stream";
 import { auth, type UserType } from "@/app/(auth)/auth";
-import { entitlementsByUserType } from "@/lib/ai/entitlements";
 import {
   ARTIFACT_INSTRUCTIONS,
   CUSTOMGPT_API_KEY,
@@ -15,6 +14,7 @@ import {
   streamCustomGPTToDataStream,
   uiMessagesToCustomGPT,
 } from "@/lib/ai/customgpt";
+import { entitlementsByUserType } from "@/lib/ai/entitlements";
 import { isProductionEnvironment } from "@/lib/constants";
 import {
   createStreamId,
@@ -130,8 +130,8 @@ export async function POST(request: Request) {
     };
 
     // Accumulate the assistant reply for DB persistence
-    let assistantTextAccumulated = "";
-    let assistantMessageId = generateUUID();
+    let _assistantTextAccumulated = "";
+    const assistantMessageId = generateUUID();
 
     const stream = createUIMessageStream({
       execute: async ({ writer: dataStream }) => {
@@ -151,7 +151,7 @@ export async function POST(request: Request) {
           session,
         });
 
-        assistantTextAccumulated = fullText;
+        _assistantTextAccumulated = fullText;
 
         dataStream.write({ type: "finish", finishReason: "stop" });
 
@@ -183,7 +183,9 @@ export async function POST(request: Request) {
     return createUIMessageStreamResponse({
       stream,
       async consumeSseStream({ stream: sseStream }) {
-        if (!process.env.REDIS_URL) return;
+        if (!process.env.REDIS_URL) {
+          return;
+        }
         try {
           const streamContext = getStreamContext();
           if (streamContext) {

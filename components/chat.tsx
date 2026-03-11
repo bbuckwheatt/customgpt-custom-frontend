@@ -184,7 +184,9 @@ export function Chat({
           type: "error",
           description: error.message,
         });
-      } else if (error.message?.includes("AI Gateway requires a valid credit card")) {
+      } else if (
+        error.message?.includes("AI Gateway requires a valid credit card")
+      ) {
         setShowCreditCardAlert(true);
       } else if (error instanceof ChatbotError) {
         toast({

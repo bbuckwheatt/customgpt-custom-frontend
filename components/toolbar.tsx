@@ -1,12 +1,12 @@
 "use client";
 import type { UseChatHelpers } from "@ai-sdk/react";
-import cx from "classnames";
+import cx from "clsx";
 import {
   AnimatePresence,
   motion,
   useMotionValue,
   useTransform,
-} from "framer-motion";
+} from "motion/react";
 import { nanoid } from "nanoid";
 import {
   type Dispatch,
