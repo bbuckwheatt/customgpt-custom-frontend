@@ -7,15 +7,12 @@ import { EditorView } from "prosemirror-view";
 import { memo, useEffect, useRef } from "react";
 
 import type { Suggestion } from "@/lib/db/schema";
-import {
-  documentSchema,
-  handleTransaction,
-  headingRule,
-} from "@/lib/editor/config";
+import { documentSchema, headingRule } from "@/lib/editor/config";
 import {
   buildContentFromDocument,
   buildDocumentFromContent,
   createDecorations,
+  handleTransaction,
 } from "@/lib/editor/functions";
 import {
   projectWithPositions,

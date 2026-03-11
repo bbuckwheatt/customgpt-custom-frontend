@@ -7,7 +7,9 @@ import {
   type MarkdownSerializerState,
 } from "prosemirror-markdown";
 import type { Node } from "prosemirror-model";
+import type { Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
+import type { MutableRefObject } from "react";
 
 import { documentSchema } from "./config";
 import { createSuggestionWidget, type UISuggestion } from "./suggestions";
@@ -193,4 +195,31 @@ export const createDecorations = (
   }
 
   return DecorationSet.create(view.state.doc, decorations);
+};
+
+export const handleTransaction = ({
+  transaction,
+  editorRef,
+  onSaveContent,
+}: {
+  transaction: Transaction;
+  editorRef: MutableRefObject<EditorView | null>;
+  onSaveContent: (updatedContent: string, debounce: boolean) => void;
+}) => {
+  if (!editorRef || !editorRef.current) {
+    return;
+  }
+
+  const newState = editorRef.current.state.apply(transaction);
+  editorRef.current.updateState(newState);
+
+  if (transaction.docChanged && !transaction.getMeta("no-save")) {
+    const updatedContent = buildContentFromDocument(newState.doc);
+
+    if (transaction.getMeta("no-debounce")) {
+      onSaveContent(updatedContent, false);
+    } else {
+      onSaveContent(updatedContent, true);
+    }
+  }
 };
