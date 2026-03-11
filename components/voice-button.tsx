@@ -59,14 +59,22 @@ function createSpeechRecognition(): SpeechRecognitionInstance | null {
 
 function PureVoiceButton({
   onTranscript,
+  existingText,
   disabled,
 }: {
   onTranscript: (text: string) => void;
+  existingText: string;
   disabled?: boolean;
 }) {
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const [supported, setSupported] = useState(true);
+  const onTranscriptRef = useRef(onTranscript);
+  const existingTextRef = useRef(existingText);
+
+  useEffect(() => {
+    onTranscriptRef.current = onTranscript;
+  }, [onTranscript]);
 
   useEffect(() => {
     setSupported(isSpeechRecognitionSupported());
@@ -83,6 +91,9 @@ function PureVoiceButton({
       toast.error("Speech recognition is not supported in this browser.");
       return;
     }
+
+    // Capture the existing text at recording start
+    existingTextRef.current = existingText;
 
     recognitionRef.current = recognition;
     recognition.continuous = true;
@@ -101,7 +112,9 @@ function PureVoiceButton({
           interim += result[0].transcript;
         }
       }
-      onTranscript(finalTranscript + interim);
+      const prefix = existingTextRef.current;
+      const separator = prefix && !prefix.endsWith(" ") ? " " : "";
+      onTranscriptRef.current(prefix + separator + finalTranscript + interim);
     };
 
     recognition.onend = () => {
@@ -114,6 +127,8 @@ function PureVoiceButton({
         toast.error(
           "Microphone access denied. Please allow microphone permissions."
         );
+      } else if (event.error === "no-speech") {
+        toast.error("No speech detected. Try again.");
       } else if (event.error !== "aborted") {
         toast.error(`Speech recognition error: ${event.error}`);
       }
@@ -123,7 +138,7 @@ function PureVoiceButton({
 
     recognition.start();
     setIsListening(true);
-  }, [isListening, onTranscript]);
+  }, [isListening, existingText]);
 
   // Cleanup on unmount
   useEffect(() => {

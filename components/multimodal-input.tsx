@@ -43,6 +43,7 @@ import {
 import { ArrowUpIcon, StopIcon } from "./icons";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import type { VisibilityType } from "./visibility-selector";
 import { VoiceButton } from "./voice-button";
 
@@ -234,10 +235,18 @@ function PureMultimodalInput({
           </PromptInputTools>
 
           <div className="flex items-center gap-1">
-            <VoiceButton
-              disabled={status !== "ready"}
-              onTranscript={(text) => setInput(text)}
-            />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <VoiceButton
+                    disabled={status !== "ready"}
+                    existingText={input}
+                    onTranscript={(text) => setInput(text)}
+                  />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Voice input</TooltipContent>
+            </Tooltip>
             {status === "submitted" ? (
               <StopButton setMessages={setMessages} stop={stop} />
             ) : (
