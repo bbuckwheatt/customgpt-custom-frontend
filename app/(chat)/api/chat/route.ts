@@ -100,7 +100,7 @@ export async function POST(request: Request) {
         sessionId,
       });
 
-      chatTitle = generateTitleFromUserMessage({ message });
+      chatTitle = await generateTitleFromUserMessage({ message });
     }
 
     if (!sessionId) {
