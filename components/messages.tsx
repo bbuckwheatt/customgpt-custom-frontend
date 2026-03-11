@@ -75,7 +75,16 @@ function PureMessages({
             />
           ))}
 
-          {status === "submitted" &&
+          {(status === "submitted" ||
+            (status === "streaming" &&
+              !messages.some(
+                (msg) =>
+                  msg.role === "assistant" &&
+                  msg.parts?.some(
+                    (part) =>
+                      part.type === "text" && "text" in part && part.text
+                  )
+              ))) &&
             !messages.some((msg) =>
               msg.parts?.some(
                 (part) => "state" in part && part.state === "approval-responded"
