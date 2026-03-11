@@ -14,7 +14,7 @@ import {
   streamCustomGPTToDataStream,
 } from "@/lib/ai/customgpt";
 import { entitlementsByUserType } from "@/lib/ai/entitlements";
-import { isProductionEnvironment } from "@/lib/constants";
+
 import {
   createStreamId,
   deleteChatById,
@@ -168,7 +168,10 @@ export async function POST(request: Request) {
           });
         }
       },
-      onError: () => "Oops, an error occurred! Please try again.",
+      onError: (error) => {
+        console.error("Stream error:", error);
+        return "Oops, an error occurred! Please try again.";
+      },
     });
 
     return createUIMessageStreamResponse({
@@ -196,12 +199,11 @@ export async function POST(request: Request) {
     const vercelId = request.headers.get("x-vercel-id");
 
     if (error instanceof ChatbotError) {
+      console.error("ChatbotError in chat API:", error.message);
       return error.toResponse();
     }
 
-    if (isProductionEnvironment) {
-      console.error("Unhandled error in chat API:", error, { vercelId });
-    }
+    console.error("Unhandled error in chat API:", error, { vercelId });
 
     return new ChatbotError("offline:chat").toResponse();
   }
