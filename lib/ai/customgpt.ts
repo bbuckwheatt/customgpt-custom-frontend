@@ -127,6 +127,25 @@ export async function streamCustomGPTToDataStream({
   const textId = generateUUID();
   let textStarted = false;
 
+  // Queue of text chunks to drip out with small delays so the browser
+  // renders incrementally even when CustomGPT sends big batches.
+  const textQueue: string[] = [];
+  let dripping = false;
+
+  const drip = async () => {
+    if (dripping) {
+      return;
+    }
+    dripping = true;
+    while (textQueue.length > 0) {
+      const word = textQueue.shift()!;
+      dataStream.write({ type: "text-delta", delta: word, id: textId });
+      // Tiny yield so each write flushes as its own SSE event
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    dripping = false;
+  };
+
   const emitText = (text: string) => {
     if (!text) {
       return;
@@ -135,12 +154,18 @@ export async function streamCustomGPTToDataStream({
       dataStream.write({ type: "text-start", id: textId });
       textStarted = true;
     }
-    // Split into words (keeping whitespace attached) so large chunks
-    // from CustomGPT trickle out word-by-word instead of all at once.
     for (const word of text.split(/(?<=\s)/)) {
       if (word) {
-        dataStream.write({ type: "text-delta", delta: word, id: textId });
+        textQueue.push(word);
       }
+    }
+    drip();
+  };
+
+  // Wait for all queued text to flush before finishing the stream.
+  const flushText = async () => {
+    while (textQueue.length > 0 || dripping) {
+      await new Promise((r) => setTimeout(r, 10));
     }
   };
 
@@ -349,6 +374,8 @@ export async function streamCustomGPTToDataStream({
   if (finalPhase === "content" && closeBuf) {
     emitContentDelta(closeBuf);
   }
+
+  await flushText();
 
   if (textStarted) {
     dataStream.write({ type: "text-end", id: textId });
