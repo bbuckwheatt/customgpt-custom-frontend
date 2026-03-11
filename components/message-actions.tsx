@@ -7,6 +7,7 @@ import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import { Action, Actions } from "./elements/actions";
 import { CopyIcon, PencilEditIcon, ThumbDownIcon, ThumbUpIcon } from "./icons";
+import { SpeakButton } from "./speak-button";
 
 export function PureMessageActions({
   chatId,
@@ -72,6 +73,8 @@ export function PureMessageActions({
       <Action onClick={handleCopy} tooltip="Copy">
         <CopyIcon />
       </Action>
+
+      {textFromParts && <SpeakButton text={textFromParts} />}
 
       <Action
         data-testid="message-upvote"
