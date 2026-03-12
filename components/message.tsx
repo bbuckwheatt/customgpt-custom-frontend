@@ -1,9 +1,12 @@
 "use client";
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { useState } from "react";
+import { useCitations } from "@/hooks/use-citations";
+import type { Citation } from "@/lib/ai/customgpt";
 import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
+import { Citations } from "./citations";
 import { useDataStream } from "./data-stream-provider";
 import { DocumentToolResult } from "./document";
 import { DocumentPreview } from "./document-preview";
@@ -45,10 +48,22 @@ const PurePreviewMessage = ({
   requiresScrollPadding: boolean;
 }) => {
   const [mode, setMode] = useState<"view" | "edit">("view");
+  const { citations: streamingCitations } = useCitations();
 
   const attachmentsFromMessage = message.parts.filter(
     (part) => part.type === "file"
   );
+
+  // Check if this message already has citations persisted in its parts
+  const hasCitationsInParts = message.parts?.some(
+    (p) => (p as unknown as { type: string }).type === "citations"
+  );
+
+  // Show streaming citations for assistant messages that don't have them persisted yet
+  const showStreamingCitations =
+    message.role === "assistant" &&
+    !hasCitationsInParts &&
+    streamingCitations.length > 0;
 
   useDataStream();
 
@@ -107,6 +122,20 @@ const PurePreviewMessage = ({
           {message.parts?.map((part, index) => {
             const { type } = part;
             const key = `message-${message.id}-part-${index}`;
+
+            // Render citations stored in message parts (from DB)
+            if (type === ("citations" as string)) {
+              const citationsPart = part as unknown as {
+                type: "citations";
+                citations: Citation[];
+              };
+              if (citationsPart.citations?.length > 0) {
+                return (
+                  <Citations citations={citationsPart.citations} key={key} />
+                );
+              }
+              return null;
+            }
 
             if (type === "reasoning") {
               const hasContent = part.text?.trim().length > 0;
@@ -345,6 +374,10 @@ const PurePreviewMessage = ({
 
             return null;
           })}
+
+          {showStreamingCitations && (
+            <Citations citations={streamingCitations} />
+          )}
 
           {!isReadonly && (
             <MessageActions
