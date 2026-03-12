@@ -17,6 +17,7 @@ export async function saveChatModelAsCookie(model: string) {
   cookieStore.set("chat-model", model);
 }
 
+// biome-ignore lint/suspicious/useAwait: must be async for "use server"
 export async function generateTitleFromUserMessage({
   message,
 }: {

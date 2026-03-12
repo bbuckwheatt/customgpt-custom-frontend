@@ -94,6 +94,8 @@ export function getMessageByErrorCode(errorCode: ErrorCode): string {
 
     case "rate_limit:chat":
       return "You have exceeded your maximum number of messages for the day. Please try again later.";
+    case "bad_request:chat":
+      return "This chat session has expired. Please start a new conversation.";
     case "not_found:chat":
       return "The requested chat was not found. Please check the chat ID and try again.";
     case "forbidden:chat":

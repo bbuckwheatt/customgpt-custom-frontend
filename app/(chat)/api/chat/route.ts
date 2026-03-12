@@ -22,6 +22,7 @@ import {
   getMessageCountByUserId,
   saveChat,
   saveMessages,
+  updateChatSessionId,
   updateChatTitleById,
 } from "@/lib/db/queries";
 import { ChatbotError } from "@/lib/errors";
@@ -84,6 +85,16 @@ export async function POST(request: Request) {
         return new ChatbotError("forbidden:chat").toResponse();
       }
       sessionId = chat.sessionId;
+
+      // Migrate old chats that don't have a session ID yet
+      if (!sessionId && message?.role === "user") {
+        sessionId = await createConversation({
+          projectId: CUSTOMGPT_PROJECT_ID,
+          apiKey: CUSTOMGPT_API_KEY,
+          name: chat.title,
+        });
+        await updateChatSessionId({ chatId: id, sessionId });
+      }
     } else if (message?.role === "user") {
       // New chat: create a CustomGPT conversation to get a session ID
       sessionId = await createConversation({
@@ -104,7 +115,7 @@ export async function POST(request: Request) {
     }
 
     if (!sessionId) {
-      return new ChatbotError("bad_request:api").toResponse();
+      return new ChatbotError("bad_request:chat").toResponse();
     }
 
     // Save the incoming user message
