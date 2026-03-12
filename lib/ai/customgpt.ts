@@ -14,7 +14,6 @@ export type ArtifactKind = "text" | "code" | "sheet";
 export type Citation = {
   title: string;
   url: string;
-  source_url?: string;
   snippet?: string;
 };
 
@@ -476,25 +475,14 @@ async function fetchCitationMetadata(
       }
 
       const json = await response.json();
-      // Log first citation response to discover the schema
-      if (citationIds.indexOf(id) === 0) {
-        console.log(
-          "Citation metadata response:",
-          JSON.stringify(json, null, 2)
-        );
-      }
-
       const data = json?.data ?? json;
+
+      // Schema: { id, title, description, image, url }
       const citation: Citation = {
-        title: String(data.title ?? data.name ?? ""),
-        url: String(data.url ?? data.source_url ?? data.link ?? ""),
+        title: String(data.title ?? ""),
+        url: String(data.url ?? ""),
       };
-      if (data.source_url) {
-        citation.source_url = String(data.source_url);
-      }
-      if (data.snippet) {
-        citation.snippet = String(data.snippet);
-      } else if (data.description) {
+      if (data.description) {
         citation.snippet = String(data.description);
       }
       return citation;
