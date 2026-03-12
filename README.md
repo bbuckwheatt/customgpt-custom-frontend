@@ -1,12 +1,12 @@
 # CustomGPT Chat Frontend
 
-A production-ready chat frontend for deploying your [CustomGPT](https://customgpt.ai) agent as a standalone web application. Built on the Vercel AI Chatbot template, it replaces the generic LLM backend with CustomGPT's OpenAI-compatible streaming API while adding conversation persistence, credential-based authentication, and tiered per-user rate limiting.
+A production-ready chat frontend for deploying your [CustomGPT](https://customgpt.ai) agent as a standalone web application. Built on the Vercel AI Chatbot template, it replaces the generic LLM backend with CustomGPT's native conversation API while adding conversation persistence, credential-based authentication, and tiered per-user rate limiting.
 
 ---
 
 ## What It Does
 
-- **CustomGPT-powered responses** — streams directly from your agent via CustomGPT's SSE endpoint, preserving your agent's configured persona, knowledge base, and instructions
+- **CustomGPT-powered responses** — streams directly from your agent via CustomGPT's native conversation API, preserving your agent's configured persona, knowledge base, and instructions. Each chat maps to a CustomGPT conversation session, so the agent retains full context across messages without replaying history.
 - **Persistent conversation history** — every chat is stored per-user in Postgres and surfaced in a sidebar; users can resume past conversations at any time
 - **Auth-gated access** — users register with email + password or continue as a guest; all routes are protected via Next.js middleware
 - **Tiered rate limiting** — message quotas enforced server-side per user type:
@@ -15,8 +15,10 @@ A production-ready chat frontend for deploying your [CustomGPT](https://customgp
   | Guest     | 5                 |
   | Registered | 10               |
   | Admin     | Unlimited         |
-- **Artifact panel** — the model can emit structured `<artifact>` blocks that render in a side panel as a rich text editor (ProseMirror), syntax-highlighted code editor, or spreadsheet view, with version history and copy-to-clipboard
-- **Real-time streaming** — text deltas are forwarded to the browser incrementally as they arrive from CustomGPT, with artifact content delivered after the stream closes
+- **Artifact panel** — the model can emit structured `<artifact>` blocks that render in a side panel as a rich text editor (ProseMirror), syntax-highlighted code editor, or spreadsheet view, with version history and copy-to-clipboard. Artifact instructions are injected per-message via CustomGPT's `custom_context` parameter.
+- **Real-time streaming** — text deltas are forwarded to the browser word-by-word as they arrive from CustomGPT, with a drip delay to smooth out bursty SSE chunks. A thinking indicator stays visible until the first token arrives.
+- **Voice input** — microphone button in the chat toolbar uses the Web Speech API for voice-to-text transcription, appending to any existing input
+- **Text-to-speech** — speaker icon on assistant messages reads responses aloud via the SpeechSynthesis API, with a stop button to cancel
 
 ---
 
@@ -24,7 +26,7 @@ A production-ready chat frontend for deploying your [CustomGPT](https://customgp
 
 CustomGPT turns any document collection, website, or knowledge base into a production-ready AI agent — complete with a configured persona, source citations, and guardrails — without ML engineering. Vercel provides the deployment and runtime layer that makes that agent customer-facing: globally distributed serverless compute, a managed storage ecosystem, and built-in observability. The combination means a business can go from a curated knowledge base to a fully branded, auth-gated chat product — with conversation history, tiered access, and real-time streaming responses — without owning infrastructure or training a model. Time-to-launch is measured in days rather than quarters, and operating costs track usage rather than reserved capacity.
 
-The architecture draws a deliberate line between what is resolved on the server and what runs in the browser. Pages that depend on persisted data are assembled before the first byte reaches the client, eliminating the round-trip waterfall that client-fetching would require; only the parts of the UI that genuinely need interactivity — the message input, live token delivery, artifact editing — run in the browser. Incoming response tokens are forwarded incrementally as they arrive from CustomGPT, and a loading indicator bridges the submission-to-first-token gap so users never face a blank response area; authentication resolution is isolated in a narrow deferred boundary so the sidebar is sized correctly from the first painted frame, removing layout shift. Shared mutable state — artifact content and status — lives in a per-conversation client cache so any component can read or update it without prop drilling, and optimistic mutations are reconciled against server-confirmed versions once the stream closes. Each dependency was chosen to pay for its own complexity: the AI SDK abstracts the streaming wire protocol, a typed ORM makes schema changes auditable, and JWT-based sessions avoid an external identity provider. Vercel's platform handles distribution, compression, and TLS automatically; native integrations with Neon Postgres, Blob storage, and Upstash Redis provision and scale without configuration; and real-user performance telemetry gives visibility into load and layout regressions before they affect end users.
+The architecture draws a deliberate line between what is resolved on the server and what runs in the browser. Pages that depend on persisted data are assembled before the first byte reaches the client, eliminating the round-trip waterfall that client-fetching would require; only the parts of the UI that genuinely need interactivity — the message input, voice transcription, live token delivery, artifact editing — run in the browser. Incoming response tokens are forwarded incrementally as they arrive from CustomGPT, and a loading indicator bridges the submission-to-first-token gap so users never face a blank response area; authentication resolution is isolated in a narrow deferred boundary so the sidebar is sized correctly from the first painted frame, removing layout shift. Shared mutable state — artifact content and status — lives in a per-conversation client cache so any component can read or update it without prop drilling, and optimistic mutations are reconciled against server-confirmed versions once the stream closes. Each dependency was chosen to pay for its own complexity: the AI SDK abstracts the streaming wire protocol, a typed ORM makes schema changes auditable, and JWT-based sessions avoid an external identity provider. Vercel's platform handles distribution, compression, and TLS automatically; native integrations with Neon Postgres, Blob storage, and Upstash Redis provision and scale without configuration; and real-user performance telemetry gives visibility into load and layout regressions before they affect end users.
 
 ---
 
@@ -38,18 +40,18 @@ Browser
         └── components/          Client-side chat shell, artifact panel, streaming
 
 Server (API routes — Node.js runtime)
-  ├── POST /api/chat             Core handler: auth → rate limit → CustomGPT stream
+  ├── POST /api/chat             Core handler: auth → rate limit → session create → CustomGPT stream
   ├── GET  /api/history          Paginated conversation list (SWR infinite)
   ├── GET  /api/document         Artifact document fetch (SWR)
   └── POST /api/files/upload     Blob upload (API only; upload UI is disabled by default)
 
 Data layer
-  ├── Neon Postgres (Drizzle ORM)  Users, chats, messages, documents, votes
+  ├── Neon Postgres (Drizzle ORM)  Users, chats (with sessionId), messages, documents, votes
   ├── Vercel Blob                  File attachments
   └── Redis                        Resumable stream state (production only)
 
 External
-  └── CustomGPT API               SSE streaming, agent persona + knowledge base
+  └── CustomGPT API               Native conversation API (session-based), SSE streaming
 ```
 
 ### Key design decisions
@@ -60,14 +62,14 @@ Pages that need data (chat history, document versions) are server-rendered — n
 **Vercel AI SDK (`useChat` / `UIMessageStreamWriter`)**
 The SDK handles the browser-side streaming protocol (chunked fetch, message part assembly, optimistic UI updates) without custom WebSocket infrastructure. The server-side `createUIMessageStream` writer lets us inject custom `data-*` events (artifact deltas, rate limit signals) alongside text without breaking the standard message format.
 
-**CustomGPT via its OpenAI-compatible SSE endpoint**
-No SDK wrapper needed — a standard `fetch` with `Accept: text/event-stream` is sufficient. The server buffers artifact XML blocks while forwarding plain text deltas in real time, then emits structured artifact events after the stream closes. This keeps latency low for conversational responses while still supporting rich artifact output.
+**CustomGPT via its native conversation API**
+Each chat creates a conversation session via `POST /projects/{id}/conversations`, and messages are sent to `POST /projects/{id}/conversations/{sessionId}/messages?stream=true`. CustomGPT manages conversation history server-side, so only the latest user message is sent per request. Artifact instructions are injected per-message via the `custom_context` parameter (≤500 chars). The server parses the native SSE format (`event: progress` → text deltas) and drips words to the browser with small delays for smooth rendering.
 
 **Auth.js (credentials + guest)**
 JWT-based sessions with no external OAuth dependency. The guest provider auto-creates an anonymous account in the database, giving unauthenticated users access to conversation history within a session while still being subject to rate limits. Admin status is determined by the `ADMIN_EMAILS` environment variable (comma-separated email addresses) at sign-in time and stored in the JWT.
 
 **Drizzle ORM + Neon Postgres**
-Type-safe schema with auto-generated migrations. Messages are stored as structured JSON `parts` arrays (Vercel AI SDK v6 format), making it straightforward to replay full conversations back to CustomGPT.
+Type-safe schema with auto-generated migrations. Messages are stored as structured JSON `parts` arrays (Vercel AI SDK v6 format). Each chat record stores a `sessionId` linking it to a CustomGPT conversation, so the agent retains context without message replay.
 
 **Redis for stream resumption**
 When `REDIS_URL` is set, each streaming response is registered as a resumable stream. If a client disconnects mid-stream it can reconnect and pick up where it left off. Redis is only consulted in production; local development skips it entirely.
@@ -93,10 +95,10 @@ Artifact content, kind, and status live in SWR's cache keyed per chat (e.g. `art
 │   ├── (chat)/
 │   │   ├── page.tsx                 Home — renders new chat UI directly
 │   │   ├── layout.tsx               Chat shell layout (sidebar + main)
-│   │   ├── actions.ts               Server actions: save chat, delete chat, save document
+│   │   ├── actions.ts               Server actions: title generation, delete trailing messages
 │   │   ├── chat/[id]/page.tsx       Individual chat page (server-rendered)
 │   │   └── api/
-│   │       ├── chat/route.ts        ★ Core: auth → rate limit → CustomGPT stream
+│   │       ├── chat/route.ts        ★ Core: auth → rate limit → session → CustomGPT stream
 │   │       ├── chat/schema.ts       Zod request schema
 │   │       ├── chat/[id]/stream/    Stream resumption endpoint
 │   │       ├── history/route.ts     Paginated chat history
@@ -122,6 +124,10 @@ Artifact content, kind, and status live in SWR's cache keyed per chat (e.g. `art
 │
 ├── components/
 │   ├── chat.tsx                     ★ Main chat component: useChat, rate limit state
+│   ├── messages.tsx                 Message list with thinking indicator logic
+│   ├── multimodal-input.tsx         Chat input toolbar (text, voice, model selector)
+│   ├── voice-button.tsx             Voice-to-text via Web Speech API (lazy loaded)
+│   ├── speak-button.tsx             Text-to-speech via SpeechSynthesis API (lazy loaded)
 │   ├── artifact.tsx                 Artifact side panel
 │   ├── data-stream-handler.tsx      ★ Processes data-* stream events into artifact state
 │   ├── data-stream-provider.tsx     Context for buffering incoming stream deltas
@@ -135,13 +141,13 @@ Artifact content, kind, and status live in SWR's cache keyed per chat (e.g. `art
 │
 ├── lib/
 │   ├── ai/
-│   │   ├── customgpt.ts             ★ CustomGPT SSE streaming, artifact XML parsing
+│   │   ├── customgpt.ts             ★ CustomGPT conversation API, SSE streaming, artifact parsing
 │   │   ├── entitlements.ts          ★ Per-user-type message quotas
 │   │   ├── prompts.ts               System prompt construction
 │   │   ├── models.ts                Model registry (single CustomGPT entry)
 │   │   └── tools/                   AI SDK tool definitions (create/update document)
 │   ├── db/
-│   │   ├── schema.ts                Drizzle schema: User, Chat, Message_v2, Document
+│   │   ├── schema.ts                Drizzle schema: User, Chat (with sessionId), Message_v2, Document
 │   │   ├── queries.ts               All database queries
 │   │   ├── migrate.ts               Migration runner
 │   │   └── migrations/              SQL migration files
