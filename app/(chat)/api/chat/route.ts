@@ -146,7 +146,7 @@ export async function POST(request: Request) {
           messageId: assistantMessageId,
         });
 
-        const accumulated = await streamCustomGPTToDataStream({
+        const { accumulated, citations } = await streamCustomGPTToDataStream({
           message: userText,
           sessionId: sessionId!,
           projectId: CUSTOMGPT_PROJECT_ID,
@@ -160,12 +160,19 @@ export async function POST(request: Request) {
         // Save assistant message immediately after streaming completes
         // (server-side), so it persists even if the client disconnects.
         if (accumulated) {
+          const parts: Record<string, unknown>[] = [
+            { type: "text", text: accumulated },
+          ];
+          if (citations.length > 0) {
+            parts.push({ type: "citations", citations });
+          }
+
           await saveMessages({
             messages: [
               {
                 id: assistantMessageId,
                 role: "assistant",
-                parts: [{ type: "text", text: accumulated }],
+                parts,
                 createdAt: new Date(),
                 attachments: [],
                 chatId: id,

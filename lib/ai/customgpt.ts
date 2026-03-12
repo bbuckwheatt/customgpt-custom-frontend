@@ -11,6 +11,18 @@ export const CUSTOMGPT_API_KEY = process.env.CUSTOMGPT_API_KEY ?? "";
 
 export type ArtifactKind = "text" | "code" | "sheet";
 
+export type Citation = {
+  title: string;
+  url: string;
+  source_url?: string;
+  snippet?: string;
+};
+
+export type StreamResult = {
+  accumulated: string;
+  citations: Citation[];
+};
+
 /**
  * Artifact output instructions sent via custom_context per message
  * so CustomGPT knows how to emit artifacts we can parse and render.
@@ -87,7 +99,7 @@ export async function streamCustomGPTToDataStream({
   signal?: AbortSignal;
   dataStream: UIMessageStreamWriter<ChatMessage>;
   session: Session;
-}): Promise<string> {
+}): Promise<StreamResult> {
   const url = new URL(
     `${CUSTOMGPT_API_BASE}/projects/${projectId}/conversations/${sessionId}/messages`
   );
@@ -323,6 +335,7 @@ export async function streamCustomGPTToDataStream({
 
   // ── SSE reading loop (native CustomGPT format) ─────────────────────────
   let currentEvent = "";
+  let citations: Citation[] = [];
   outer: while (true) {
     const { done, value } = await reader.read();
     if (done) {
@@ -351,6 +364,15 @@ export async function streamCustomGPTToDataStream({
         const chunk = JSON.parse(payload);
 
         if (currentEvent === "finish" || chunk.status === "finish") {
+          // Extract citations from the finish event
+          if (Array.isArray(chunk.citations) && chunk.citations.length > 0) {
+            citations = chunk.citations.map((c: Record<string, unknown>) => ({
+              title: String(c.title ?? ""),
+              url: String(c.url ?? c.source_url ?? ""),
+              source_url: c.source_url ? String(c.source_url) : undefined,
+              snippet: c.snippet ? String(c.snippet) : undefined,
+            }));
+          }
           break outer;
         }
 
@@ -398,7 +420,12 @@ export async function streamCustomGPTToDataStream({
     dataStream.write({ type: "data-finish", data: null, transient: true });
   }
 
-  return accumulated;
+  // ── Emit citations ────────────────────────────────────────────────────
+  if (citations.length > 0) {
+    dataStream.write({ type: "data-citations", data: citations });
+  }
+
+  return { accumulated, citations };
 }
 
 /**
