@@ -364,6 +364,11 @@ export async function streamCustomGPTToDataStream({
         const chunk = JSON.parse(payload);
 
         if (currentEvent === "finish" || chunk.status === "finish") {
+          // Log raw finish payload to determine citation format
+          console.log(
+            "CustomGPT finish event:",
+            JSON.stringify(chunk, null, 2)
+          );
           // Extract citations from the finish event
           if (Array.isArray(chunk.citations) && chunk.citations.length > 0) {
             citations = chunk.citations.map((c: Record<string, unknown>) => ({
