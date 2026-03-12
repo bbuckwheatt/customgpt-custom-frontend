@@ -146,7 +146,7 @@ export async function POST(request: Request) {
           messageId: assistantMessageId,
         });
 
-        await streamCustomGPTToDataStream({
+        const accumulated = await streamCustomGPTToDataStream({
           message: userText,
           sessionId: sessionId!,
           projectId: CUSTOMGPT_PROJECT_ID,
@@ -157,6 +157,23 @@ export async function POST(request: Request) {
 
         dataStream.write({ type: "finish", finishReason: "stop" });
 
+        // Save assistant message immediately after streaming completes
+        // (server-side), so it persists even if the client disconnects.
+        if (accumulated) {
+          await saveMessages({
+            messages: [
+              {
+                id: assistantMessageId,
+                role: "assistant",
+                parts: [{ type: "text", text: accumulated }],
+                createdAt: new Date(),
+                attachments: [],
+                chatId: id,
+              },
+            ],
+          });
+        }
+
         // Update the chat title (first message only)
         if (chatTitle) {
           dataStream.write({ type: "data-chat-title", data: chatTitle });
@@ -164,20 +181,6 @@ export async function POST(request: Request) {
         }
       },
       generateId: generateUUID,
-      onFinish: async ({ messages: finishedMessages }) => {
-        if (finishedMessages.length > 0) {
-          await saveMessages({
-            messages: finishedMessages.map((m) => ({
-              id: m.id,
-              role: m.role,
-              parts: m.parts,
-              createdAt: new Date(),
-              attachments: [],
-              chatId: id,
-            })),
-          });
-        }
-      },
       onError: (error) => {
         console.error("Stream error:", error);
         return "Oops, an error occurred! Please try again.";
