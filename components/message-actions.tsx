@@ -1,4 +1,5 @@
 import equal from "fast-deep-equal";
+import dynamic from "next/dynamic";
 import { memo } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
@@ -7,7 +8,11 @@ import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import { Action, Actions } from "./elements/actions";
 import { CopyIcon, PencilEditIcon, ThumbDownIcon, ThumbUpIcon } from "./icons";
-import { SpeakButton } from "./speak-button";
+
+const SpeakButton = dynamic(
+  () => import("./speak-button").then((m) => ({ default: m.SpeakButton })),
+  { ssr: false }
+);
 
 export function PureMessageActions({
   chatId,

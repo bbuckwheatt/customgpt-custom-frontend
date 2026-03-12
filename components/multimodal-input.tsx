@@ -4,6 +4,7 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
 import { CheckIcon } from "lucide-react";
+import dynamic from "next/dynamic";
 import {
   type Dispatch,
   memo,
@@ -43,9 +44,18 @@ import {
 import { ArrowUpIcon, StopIcon } from "./icons";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
 import type { VisibilityType } from "./visibility-selector";
-import { VoiceButton } from "./voice-button";
+
+const VoiceButton = dynamic(
+  () => import("./voice-button").then((m) => ({ default: m.VoiceButton })),
+  { ssr: false }
+);
 
 function setCookie(name: string, value: string) {
   const maxAge = 60 * 60 * 24 * 365; // 1 year
@@ -235,18 +245,20 @@ function PureMultimodalInput({
           </PromptInputTools>
 
           <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span>
-                  <VoiceButton
-                    disabled={status !== "ready"}
-                    existingText={input}
-                    onTranscript={(text) => setInput(text)}
-                  />
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>Voice input</TooltipContent>
-            </Tooltip>
+            <TooltipProvider delayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <VoiceButton
+                      disabled={status !== "ready"}
+                      existingText={input}
+                      onTranscript={(text) => setInput(text)}
+                    />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>Voice input</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             {status === "submitted" ? (
               <StopButton setMessages={setMessages} stop={stop} />
             ) : (
