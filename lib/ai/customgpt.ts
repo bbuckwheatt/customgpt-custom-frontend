@@ -335,7 +335,7 @@ export async function streamCustomGPTToDataStream({
 
   // ── SSE reading loop (native CustomGPT format) ─────────────────────────
   let currentEvent = "";
-  let citations: Citation[] = [];
+  let citationIds: number[] = [];
   outer: while (true) {
     const { done, value } = await reader.read();
     if (done) {
@@ -364,19 +364,9 @@ export async function streamCustomGPTToDataStream({
         const chunk = JSON.parse(payload);
 
         if (currentEvent === "finish" || chunk.status === "finish") {
-          // Log raw finish payload to determine citation format
-          console.log(
-            "CustomGPT finish event:",
-            JSON.stringify(chunk, null, 2)
-          );
-          // Extract citations from the finish event
+          // Citation IDs to resolve after streaming
           if (Array.isArray(chunk.citations) && chunk.citations.length > 0) {
-            citations = chunk.citations.map((c: Record<string, unknown>) => ({
-              title: String(c.title ?? ""),
-              url: String(c.url ?? c.source_url ?? ""),
-              source_url: c.source_url ? String(c.source_url) : undefined,
-              snippet: c.snippet ? String(c.snippet) : undefined,
-            }));
+            citationIds = chunk.citations as number[];
           }
           break outer;
         }
@@ -425,7 +415,8 @@ export async function streamCustomGPTToDataStream({
     dataStream.write({ type: "data-finish", data: null, transient: true });
   }
 
-  // ── Emit citations ────────────────────────────────────────────────────
+  // ── Fetch and emit citations ────────────────────────────────────────
+  const citations = await fetchCitationMetadata(citationIds, projectId, apiKey);
   if (citations.length > 0) {
     dataStream.write({ type: "data-citations", data: citations });
   }
@@ -451,6 +442,72 @@ export function getLastUserMessageText(
     .filter((p) => p.type === "text")
     .map((p) => p.text ?? "")
     .join("");
+}
+
+/**
+ * Fetches citation metadata from CustomGPT for each citation ID.
+ * The finish event only returns IDs; we hit the citation endpoint to get
+ * the title, URL, and other metadata for each one.
+ */
+async function fetchCitationMetadata(
+  citationIds: number[],
+  projectId: string,
+  apiKey: string
+): Promise<Citation[]> {
+  if (citationIds.length === 0) {
+    return [];
+  }
+
+  const results = await Promise.allSettled(
+    citationIds.map(async (id) => {
+      const response = await fetch(
+        `${CUSTOMGPT_API_BASE}/projects/${projectId}/citations/${id}`,
+        {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            Accept: "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        console.error(`Citation fetch failed for ID ${id}: ${response.status}`);
+        return null;
+      }
+
+      const json = await response.json();
+      // Log first citation response to discover the schema
+      if (citationIds.indexOf(id) === 0) {
+        console.log(
+          "Citation metadata response:",
+          JSON.stringify(json, null, 2)
+        );
+      }
+
+      const data = json?.data ?? json;
+      const citation: Citation = {
+        title: String(data.title ?? data.name ?? ""),
+        url: String(data.url ?? data.source_url ?? data.link ?? ""),
+      };
+      if (data.source_url) {
+        citation.source_url = String(data.source_url);
+      }
+      if (data.snippet) {
+        citation.snippet = String(data.snippet);
+      } else if (data.description) {
+        citation.snippet = String(data.description);
+      }
+      return citation;
+    })
+  );
+
+  return results
+    .filter(
+      (r): r is PromiseFulfilledResult<Citation | null> =>
+        r.status === "fulfilled"
+    )
+    .map((r) => r.value)
+    .filter((c): c is Citation => c !== null && Boolean(c.title || c.url));
 }
 
 function deriveTitle(content: string, kind: ArtifactKind): string {
