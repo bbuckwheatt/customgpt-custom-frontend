@@ -5,12 +5,10 @@ import useSWR from "swr";
 import type { Citation } from "@/lib/ai/customgpt";
 import { ArtifactChatContext } from "./use-artifact";
 
-type CitationsState = {
-  messageId: string;
-  citations: Citation[];
-};
+/** Map of messageId → citations, accumulates across the conversation */
+type CitationsMap = Record<string, Citation[]>;
 
-const emptyCitations: CitationsState = { messageId: "", citations: [] };
+const emptyMap: CitationsMap = {};
 
 function useCitationsKey() {
   const chatId = useContext(ArtifactChatContext);
@@ -20,24 +18,31 @@ function useCitationsKey() {
 export function useCitations() {
   const key = useCitationsKey();
 
-  const { data, mutate } = useSWR<CitationsState>(key, null, {
-    fallbackData: emptyCitations,
+  const { data, mutate } = useSWR<CitationsMap>(key, null, {
+    fallbackData: emptyMap,
   });
 
+  const map = data ?? emptyMap;
+
   const setCitations = useCallback(
-    (state: CitationsState) => {
-      mutate(state, { revalidate: false });
+    (state: { messageId: string; citations: Citation[] }) => {
+      mutate(
+        (prev) => ({
+          ...(prev ?? emptyMap),
+          [state.messageId]: state.citations,
+        }),
+        { revalidate: false }
+      );
     },
     [mutate]
   );
 
   const clearCitations = useCallback(() => {
-    mutate(emptyCitations, { revalidate: false });
+    mutate(emptyMap, { revalidate: false });
   }, [mutate]);
 
   return {
-    citationsMessageId: data?.messageId ?? "",
-    citations: data?.citations ?? [],
+    citationsMap: map,
     setCitations,
     clearCitations,
   };
