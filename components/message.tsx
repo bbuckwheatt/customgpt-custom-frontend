@@ -48,18 +48,17 @@ const PurePreviewMessage = ({
   requiresScrollPadding: boolean;
 }) => {
   const [mode, setMode] = useState<"view" | "edit">("view");
-  const { citationsMessageId, citations: streamingCitations } = useCitations();
+  const { citationsMap } = useCitations();
 
   const attachmentsFromMessage = message.parts.filter(
     (part) => part.type === "file"
   );
 
-  // Show streaming citations only for the specific message they belong to.
+  // Look up accumulated streaming citations for this specific message.
   // Once the user navigates away and back, citations load from DB parts instead.
-  const showStreamingCitations =
-    message.role === "assistant" &&
-    citationsMessageId === message.id &&
-    streamingCitations.length > 0;
+  const streamingCitations =
+    message.role === "assistant" ? (citationsMap[message.id] ?? []) : [];
+  const showStreamingCitations = streamingCitations.length > 0;
 
   useDataStream();
 
