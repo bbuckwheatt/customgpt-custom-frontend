@@ -177,7 +177,6 @@ export function Chat({
     },
     onFinish: () => {
       setIsRateLimited(false);
-      setCitations([]);
       mutate(unstable_serialize(getChatHistoryPaginationKey));
     },
     onError: (error) => {
@@ -204,6 +203,16 @@ export function Chat({
       }
     },
   });
+
+  // Clear streaming citations when a new message is submitted so
+  // previous message citations don't bleed into the next response.
+  const prevStatusRef = useRef(status);
+  useEffect(() => {
+    if (prevStatusRef.current === "ready" && status === "submitted") {
+      setCitations([]);
+    }
+    prevStatusRef.current = status;
+  }, [status, setCitations]);
 
   const searchParams = useSearchParams();
   const query = searchParams.get("query");
