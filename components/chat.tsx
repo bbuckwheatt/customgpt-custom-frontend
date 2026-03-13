@@ -24,6 +24,7 @@ import {
 } from "@/hooks/use-artifact";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
+import { useCitations } from "@/hooks/use-citations";
 import type { Vote } from "@/lib/db/schema";
 import { ChatbotError } from "@/lib/errors";
 import type { Attachment, ChatMessage } from "@/lib/types";
@@ -105,6 +106,7 @@ export function Chat({
     return () => window.removeEventListener("popstate", handlePopState);
   }, [router]);
   const { setDataStream } = useDataStream();
+  const { setCitations } = useCitations();
 
   const [input, setInput] = useState<string>("");
   const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
@@ -175,6 +177,7 @@ export function Chat({
     },
     onFinish: () => {
       setIsRateLimited(false);
+      setCitations([]);
       mutate(unstable_serialize(getChatHistoryPaginationKey));
     },
     onError: (error) => {
