@@ -24,7 +24,7 @@ export function Citations({ citations }: { citations: Citation[] }) {
       >
         <FileTextIcon size={12} />
         <span>
-          {citations.length} source{citations.length !== 1 ? "s" : ""}
+          {citations.length} source{citations.length === 1 ? "" : "s"}
         </span>
       </button>
 

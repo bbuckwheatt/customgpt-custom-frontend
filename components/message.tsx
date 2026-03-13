@@ -59,8 +59,11 @@ const PurePreviewMessage = ({
     (p) => (p as unknown as { type: string }).type === "citations"
   );
 
-  // Show streaming citations for assistant messages that don't have them persisted yet
+  // Show streaming citations only on the last assistant message (isLoading is
+  // true only for the last message during streaming) and only when the message
+  // doesn't already have citations persisted in its parts.
   const showStreamingCitations =
+    isLoading &&
     message.role === "assistant" &&
     !hasCitationsInParts &&
     streamingCitations.length > 0;
