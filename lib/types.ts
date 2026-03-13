@@ -42,7 +42,7 @@ export type CustomUIDataTypes = {
   kind: ArtifactKind;
   clear: null;
   finish: null;
-  citations: Citation[];
+  citations: { messageId: string; citations: Citation[] };
   "chat-title": string;
 };
 

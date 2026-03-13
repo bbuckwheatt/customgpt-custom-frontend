@@ -155,6 +155,15 @@ export async function POST(request: Request) {
           session,
         });
 
+        // Emit citations with the message ID so the client knows
+        // which message they belong to.
+        if (citations.length > 0) {
+          dataStream.write({
+            type: "data-citations",
+            data: { messageId: assistantMessageId, citations },
+          });
+        }
+
         dataStream.write({ type: "finish", finishReason: "stop" });
 
         // Save assistant message immediately after streaming completes

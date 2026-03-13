@@ -414,11 +414,8 @@ export async function streamCustomGPTToDataStream({
     dataStream.write({ type: "data-finish", data: null, transient: true });
   }
 
-  // ── Fetch and emit citations ────────────────────────────────────────
+  // ── Resolve citation metadata ───────────────────────────────────────
   const citations = await fetchCitationMetadata(citationIds, projectId, apiKey);
-  if (citations.length > 0) {
-    dataStream.write({ type: "data-citations", data: citations });
-  }
 
   return { accumulated, citations };
 }

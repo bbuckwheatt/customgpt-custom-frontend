@@ -48,23 +48,17 @@ const PurePreviewMessage = ({
   requiresScrollPadding: boolean;
 }) => {
   const [mode, setMode] = useState<"view" | "edit">("view");
-  const { citations: streamingCitations } = useCitations();
+  const { citationsMessageId, citations: streamingCitations } = useCitations();
 
   const attachmentsFromMessage = message.parts.filter(
     (part) => part.type === "file"
   );
 
-  // Check if this message already has citations persisted in its parts
-  const hasCitationsInParts = message.parts?.some(
-    (p) => (p as unknown as { type: string }).type === "citations"
-  );
-
-  // Show streaming citations for assistant messages that don't have them
-  // persisted in their parts yet. Citations are cleared when the next
-  // stream starts, so they won't bleed across messages.
+  // Show streaming citations only for the specific message they belong to.
+  // Once the user navigates away and back, citations load from DB parts instead.
   const showStreamingCitations =
     message.role === "assistant" &&
-    !hasCitationsInParts &&
+    citationsMessageId === message.id &&
     streamingCitations.length > 0;
 
   useDataStream();

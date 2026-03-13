@@ -106,7 +106,7 @@ export function Chat({
     return () => window.removeEventListener("popstate", handlePopState);
   }, [router]);
   const { setDataStream } = useDataStream();
-  const { setCitations } = useCitations();
+  const { clearCitations } = useCitations();
 
   const [input, setInput] = useState<string>("");
   const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
@@ -209,10 +209,10 @@ export function Chat({
   const prevStatusRef = useRef(status);
   useEffect(() => {
     if (prevStatusRef.current === "ready" && status === "submitted") {
-      setCitations([]);
+      clearCitations();
     }
     prevStatusRef.current = status;
-  }, [status, setCitations]);
+  }, [status, clearCitations]);
 
   const searchParams = useSearchParams();
   const query = searchParams.get("query");

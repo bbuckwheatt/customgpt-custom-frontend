@@ -5,6 +5,13 @@ import useSWR from "swr";
 import type { Citation } from "@/lib/ai/customgpt";
 import { ArtifactChatContext } from "./use-artifact";
 
+type CitationsState = {
+  messageId: string;
+  citations: Citation[];
+};
+
+const emptyCitations: CitationsState = { messageId: "", citations: [] };
+
 function useCitationsKey() {
   const chatId = useContext(ArtifactChatContext);
   return chatId ? `citations-${chatId}` : "citations";
@@ -13,19 +20,25 @@ function useCitationsKey() {
 export function useCitations() {
   const key = useCitationsKey();
 
-  const { data: citations, mutate } = useSWR<Citation[]>(key, null, {
-    fallbackData: [],
+  const { data, mutate } = useSWR<CitationsState>(key, null, {
+    fallbackData: emptyCitations,
   });
 
   const setCitations = useCallback(
-    (newCitations: Citation[]) => {
-      mutate(newCitations, { revalidate: false });
+    (state: CitationsState) => {
+      mutate(state, { revalidate: false });
     },
     [mutate]
   );
 
+  const clearCitations = useCallback(() => {
+    mutate(emptyCitations, { revalidate: false });
+  }, [mutate]);
+
   return {
-    citations: citations ?? [],
+    citationsMessageId: data?.messageId ?? "",
+    citations: data?.citations ?? [],
     setCitations,
+    clearCitations,
   };
 }
