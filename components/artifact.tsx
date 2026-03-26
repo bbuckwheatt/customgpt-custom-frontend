@@ -320,7 +320,7 @@ function PureArtifact({
                 )}
               </AnimatePresence>
 
-              <div className="flex h-full min-w-0 flex-col items-center justify-between overflow-hidden">
+              <div className="flex h-full w-full min-w-0 flex-col items-center justify-between overflow-hidden">
                 <ArtifactMessages
                   addToolApprovalResponse={addToolApprovalResponse}
                   artifactStatus={artifact.status}
