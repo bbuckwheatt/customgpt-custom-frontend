@@ -85,7 +85,7 @@ const PurePreviewMessage = ({
             "gap-2 md:gap-4": message.parts?.some(
               (p) => p.type === "text" && p.text?.trim()
             ),
-            "w-full":
+            "min-w-0 flex-1":
               (message.role === "assistant" &&
                 (message.parts?.some(
                   (p) => p.type === "text" && p.text?.trim()
