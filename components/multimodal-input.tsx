@@ -42,6 +42,7 @@ import {
   PromptInputTools,
 } from "./elements/prompt-input";
 import { ArrowUpIcon, StopIcon } from "./icons";
+import { ChatInputGlow } from "./ui/chat-input-glow";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
 import {
@@ -202,8 +203,10 @@ function PureMultimodalInput({
         />
       )}
 
-      <PromptInput
-        className="rounded-xl border border-border bg-background p-3 shadow-xs transition-all duration-200 focus-within:border-border hover:border-muted-foreground/50"
+      <div className="relative">
+        <ChatInputGlow />
+        <PromptInput
+        className="relative rounded-xl border border-border bg-background p-3 shadow-xs transition-all duration-200 focus-within:border-border hover:border-muted-foreground/50"
         onSubmit={(event) => {
           event.preventDefault();
           if (!input.trim() && attachments.length === 0) {
@@ -273,7 +276,8 @@ function PureMultimodalInput({
             )}
           </div>
         </PromptInputToolbar>
-      </PromptInput>
+        </PromptInput>
+      </div>
     </div>
   );
 }

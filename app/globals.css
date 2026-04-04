@@ -11,6 +11,25 @@
 @plugin "tailwindcss-animate";
 @plugin "@tailwindcss/typography";
 
+/* chat input glow animation */
+@keyframes glow-amber {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes glow-yellow {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+
+@utility animate-glow-amber {
+  animation: glow-amber 8s ease-in-out infinite;
+}
+
+@utility animate-glow-yellow {
+  animation: glow-yellow 8s ease-in-out infinite;
+}
+
 /* define design tokens (light mode) */
 :root {
   --background: hsl(0 0% 100%);
@@ -48,6 +67,7 @@
   /* border radius unit */
   --radius: 0.5rem;
   --sidebar: hsl(0 0% 98%);
+  --glow-opacity: 0.2;
 }
 
 /* define design tokens (dark mode) */
@@ -85,6 +105,7 @@
   --sidebar-border: hsl(240 3.7% 15.9%);
   --sidebar-ring: hsl(217.2 91.2% 59.8%);
   --sidebar: hsl(240 5.9% 10%);
+  --glow-opacity: 0.42;
 }
 
 /* define theme */
