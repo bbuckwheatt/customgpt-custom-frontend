@@ -67,7 +67,7 @@
   /* border radius unit */
   --radius: 0.5rem;
   --sidebar: hsl(0 0% 98%);
-  --glow-opacity: 0.2;
+  --glow-opacity: 0.38;
 }
 
 /* define design tokens (dark mode) */
@@ -105,7 +105,7 @@
   --sidebar-border: hsl(240 3.7% 15.9%);
   --sidebar-ring: hsl(217.2 91.2% 59.8%);
   --sidebar: hsl(240 5.9% 10%);
-  --glow-opacity: 0.42;
+  --glow-opacity: 0.65;
 }
 
 /* define theme */
