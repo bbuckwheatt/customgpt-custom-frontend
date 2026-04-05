@@ -70,7 +70,7 @@ export function ShaderAnimation() {
 
     const animate = () => {
       animId = requestAnimationFrame(animate);
-      uniforms.time.value = clock.getElapsedTime() * 60;
+      uniforms.time.value = clock.getElapsedTime() * 8;
       renderer.render(scene, camera);
     };
     animate();
